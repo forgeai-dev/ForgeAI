@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+coverage/
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+forgeai-vault.enc
+
+# IDE / internal workspace data
+.windsurf/
+
+# Runtime data (vault with API keys, sessions, workspace prompts, WhatsApp auth)
+.forgeai/

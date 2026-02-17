@@ -1,0 +1,17 @@
+export { Gateway, createGateway } from './gateway/server.js';
+export type { GatewayOptions } from './gateway/server.js';
+export { SessionManager, createSessionManager } from './gateway/session-manager.js';
+export { initDatabase, getDatabase, runMigrations, closeDatabase } from './database/connection.js';
+export { MySQLAuditStore } from './database/audit-store.js';
+export { getAgentRuntime, getWebChatChannel, getToolRegistry, getPluginManager, getWorkflowEngine } from './gateway/chat-routes.js';
+export { ChatHistoryStore, createChatHistoryStore } from './chat-history-store.js';
+export type { StoredMessage, AgentStep as StoredAgentStep, StoredSession, SessionSummary } from './chat-history-store.js';
+export { handleChatCommand, formatUsageFooter, getSessionSettings, setAutopilotRef } from './gateway/chat-commands.js';
+export type { CommandResult, SessionSettings } from './gateway/chat-commands.js';
+export { AutopilotEngine, createAutopilotEngine } from './autopilot/autopilot-engine.js';
+export type { AutopilotTask, AutopilotConfig, AutopilotTaskHandler } from './autopilot/autopilot-engine.js';
+export { PairingManager, createPairingManager } from './pairing/pairing-manager.js';
+export type { PairingCode, PairingResult, PairingGenerateOptions } from './pairing/pairing-manager.js';
+export { setPairingRef } from './gateway/chat-commands.js';
+export { OTelManager, createOTelManager, getOTelManager } from './telemetry/otel-manager.js';
+export type { OTelConfig, SpanData, MetricPoint } from './telemetry/otel-manager.js';

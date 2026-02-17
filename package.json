@@ -1,0 +1,25 @@
+{
+  "name": "forgeai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ForgeAI — Security-first personal AI assistant. Multi-channel, multi-agent, fully audited.",
+  "author": "ForgeAI Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r run dev",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "forge": "node packages/cli/dist/index.js",
+    "db:migrate": "knex --knexfile packages/core/knexfile.ts migrate:latest",
+    "db:rollback": "knex --knexfile packages/core/knexfile.ts migrate:rollback",
+    "db:seed": "knex --knexfile packages/core/knexfile.ts seed:run"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18",
+    "ws": "^8.19.0"
+  }
+}

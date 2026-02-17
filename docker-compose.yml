@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # ─── MySQL Database ────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: forgeai-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-forgeai_secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-forgeai}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ─── ForgeAI Gateway ───────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forgeai-gateway
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_PORT:-18800}:18800"
+    environment:
+      # Database
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-forgeai_secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-forgeai}
+      # Gateway
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 18800
+      GATEWAY_SECRET: ${GATEWAY_SECRET:-change-me-to-a-random-secret}
+      # Security
+      VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-change-me-to-a-strong-password}
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-random-jwt-secret}
+      # LLM Providers
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Channels (optional)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      # Puppeteer
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - forgeai_data:/app/.forgeai
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:18800/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  mysql_data:
+    driver: local
+  forgeai_data:
+    driver: local

@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+
+ignoredBuiltDependencies:
+  - bcrypt
+  - esbuild
+  - protobufjs
+  - puppeteer

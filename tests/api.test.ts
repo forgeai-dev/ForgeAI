@@ -1,0 +1,332 @@
+import { describe, it, expect, beforeAll } from 'vitest';
+
+const BASE = 'http://127.0.0.1:18800';
+
+async function get(path: string) {
+  const res = await fetch(`${BASE}${path}`);
+  return { status: res.status, data: await res.json() };
+}
+
+async function post(path: string, body?: unknown) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, data: await res.json() };
+}
+
+describe('ForgeAI Gateway API Tests', () => {
+  // ─── Health ────────────────────────────────────────
+  describe('Health & Info', () => {
+    it('GET /health should return ok', async () => {
+      const { status, data } = await get('/health');
+      expect(status).toBe(200);
+      expect(data.status).toBe('healthy');
+    });
+
+    it('GET /info should return gateway info', async () => {
+      const { status, data } = await get('/info');
+      expect(status).toBe(200);
+      expect(data.name).toBe('ForgeAI');
+      expect(data.version).toBeDefined();
+    });
+
+    it('GET /api/health/detailed should return detailed health', async () => {
+      const { status, data } = await get('/api/health/detailed');
+      expect(status).toBe(200);
+      expect(data).toBeDefined();
+      expect(typeof data).toBe('object');
+    });
+  });
+
+  // ─── Providers ─────────────────────────────────────
+  describe('Providers', () => {
+    it('GET /api/providers should list providers', async () => {
+      const { status, data } = await get('/api/providers');
+      expect(status).toBe(200);
+      expect(data.providers).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Tools ─────────────────────────────────────────
+  describe('Tools', () => {
+    it('GET /api/tools should list tools', async () => {
+      const { status, data } = await get('/api/tools');
+      expect(status).toBe(200);
+      expect(data.tools).toBeInstanceOf(Array);
+      expect(data.tools.length).toBeGreaterThanOrEqual(6);
+    });
+  });
+
+  // ─── Plugins ───────────────────────────────────────
+  describe('Plugins', () => {
+    it('GET /api/plugins should list active plugins', async () => {
+      const { status, data } = await get('/api/plugins');
+      expect(status).toBe(200);
+      expect(data.plugins).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/plugins/store should list store plugins', async () => {
+      const { status, data } = await get('/api/plugins/store');
+      expect(status).toBe(200);
+      expect(data.plugins).toBeInstanceOf(Array);
+      expect(data.plugins.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('GET /api/plugins/store/categories should list categories', async () => {
+      const { status, data } = await get('/api/plugins/store/categories');
+      expect(status).toBe(200);
+      expect(data.categories).toBeInstanceOf(Array);
+    });
+
+    it('POST /api/plugins/store/template should generate template', async () => {
+      const { status, data } = await post('/api/plugins/store/template', { name: 'TestPlugin' });
+      expect(status).toBe(200);
+      expect(data.template).toContain('TestPlugin');
+    });
+  });
+
+  // ─── Workflows ─────────────────────────────────────
+  describe('Workflows', () => {
+    it('GET /api/workflows should list workflows', async () => {
+      const { status, data } = await get('/api/workflows');
+      expect(status).toBe(200);
+      expect(data.workflows).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Sessions ──────────────────────────────────────
+  describe('Sessions', () => {
+    it('GET /api/sessions should list sessions', async () => {
+      const { status, data } = await get('/api/sessions');
+      expect(status).toBe(200);
+      expect(data.sessions).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Voice ─────────────────────────────────────────
+  describe('Voice', () => {
+    it('GET /api/voice/config should return voice config', async () => {
+      const { status, data } = await get('/api/voice/config');
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(data.config.ttsProvider).toBeDefined();
+      expect(data.providers).toBeDefined();
+    });
+
+    it('GET /api/voice/voices should return voices list', async () => {
+      const { status, data } = await get('/api/voice/voices');
+      expect(status).toBe(200);
+      expect(data.voices).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Webhooks ──────────────────────────────────────
+  describe('Webhooks', () => {
+    it('GET /api/webhooks should return webhook lists', async () => {
+      const { status, data } = await get('/api/webhooks');
+      expect(status).toBe(200);
+      expect(data.outbound).toBeInstanceOf(Array);
+      expect(data.inbound).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/webhooks/events should return event log', async () => {
+      const { status, data } = await get('/api/webhooks/events');
+      expect(status).toBe(200);
+      expect(data.events).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Sandbox ───────────────────────────────────────
+  describe('Sandbox', () => {
+    it('GET /api/sandbox/status should return sandbox status', async () => {
+      const { status, data } = await get('/api/sandbox/status');
+      expect(status).toBe(200);
+      expect(data.status ?? data.dockerAvailable ?? data).toBeDefined();
+    });
+  });
+
+  // ─── Rate Limits ───────────────────────────────────
+  describe('Rate Limits', () => {
+    it('GET /api/rate-limits should return rules', async () => {
+      const { status, data } = await get('/api/rate-limits');
+      expect(status).toBe(200);
+      expect(data.rules).toBeInstanceOf(Array);
+      expect(data.rules.length).toBeGreaterThanOrEqual(12);
+    });
+  });
+
+  // ─── Backup ────────────────────────────────────────
+  describe('Backup', () => {
+    it('GET /api/backup/info should return backup metadata', async () => {
+      const { status, data } = await get('/api/backup/info');
+      expect(status).toBe(200);
+      expect(data).toBeDefined();
+      expect(status).toBe(200);
+    });
+  });
+
+  // ─── IP Filter ─────────────────────────────────────
+  describe('IP Filter', () => {
+    it('GET /api/ip-filter should return config', async () => {
+      const { status, data } = await get('/api/ip-filter');
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(data.config.mode).toBeDefined();
+    });
+  });
+
+  // ─── Tailscale ─────────────────────────────────────
+  describe('Tailscale', () => {
+    it('GET /api/remote/status should return tailscale status', async () => {
+      const { status, data } = await get('/api/remote/status');
+      expect(status).toBe(200);
+      expect(data.status).toBeDefined();
+    });
+  });
+
+  // ─── MCP ──────────────────────────────────────────
+  describe('MCP', () => {
+    it('GET /api/mcp/servers should return server list', async () => {
+      const { status, data } = await get('/api/mcp/servers');
+      expect(status).toBe(200);
+      expect(data.servers).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/mcp/tools should return tool list', async () => {
+      const { status, data } = await get('/api/mcp/tools');
+      expect(status).toBe(200);
+      expect(data.tools).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/mcp/resources should return resource list', async () => {
+      const { status, data } = await get('/api/mcp/resources');
+      expect(status).toBe(200);
+      expect(data.resources).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Memory ───────────────────────────────────────
+  describe('Memory', () => {
+    it('GET /api/memory/stats should return stats', async () => {
+      const { status, data } = await get('/api/memory/stats');
+      expect(status).toBe(200);
+      expect(data.stats).toBeDefined();
+      expect(data.config).toBeDefined();
+    });
+
+    it('POST /api/memory/store should store a memory', async () => {
+      const { status, data } = await post('/api/memory/store', { id: 'test-1', content: 'Hello world test memory' });
+      expect(status).toBe(200);
+      expect(data.entry).toBeDefined();
+      expect(data.entry.id).toBe('test-1');
+    });
+
+    it('POST /api/memory/search should find stored memory', async () => {
+      const { status, data } = await post('/api/memory/search', { query: 'hello world' });
+      expect(status).toBe(200);
+      expect(data.results).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── OAuth2 ───────────────────────────────────────
+  describe('OAuth2', () => {
+    it('GET /api/oauth/providers should return provider list', async () => {
+      const { status, data } = await get('/api/oauth/providers');
+      expect(status).toBe(200);
+      expect(data.providers).toBeInstanceOf(Array);
+      expect(data.providers.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  // ─── RAG ──────────────────────────────────────────
+  describe('RAG', () => {
+    it('GET /api/rag/stats should return stats', async () => {
+      const { status, data } = await get('/api/rag/stats');
+      expect(status).toBe(200);
+      expect(data.stats).toBeDefined();
+      expect(data.config).toBeDefined();
+    });
+
+    it('POST /api/rag/ingest should ingest document', async () => {
+      const { status, data } = await post('/api/rag/ingest', { id: 'doc-1', content: 'TypeScript is a typed superset of JavaScript that compiles to plain JavaScript. It adds optional static typing and class-based object-oriented programming.', metadata: { title: 'TypeScript Intro' } });
+      expect(status).toBe(200);
+      expect(data.document).toBeDefined();
+      expect(data.document.id).toBe('doc-1');
+    });
+
+    it('POST /api/rag/search should find ingested content', async () => {
+      const { status, data } = await post('/api/rag/search', { query: 'typescript typing' });
+      expect(status).toBe(200);
+      expect(data.results).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/rag/documents should list documents', async () => {
+      const { status, data } = await get('/api/rag/documents');
+      expect(status).toBe(200);
+      expect(data.documents).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Auto-Planner ────────────────────────────────
+  describe('Auto-Planner', () => {
+    it('GET /api/planner/plans should return plans list', async () => {
+      const { status, data } = await get('/api/planner/plans');
+      expect(status).toBe(200);
+      expect(data.plans).toBeInstanceOf(Array);
+    });
+
+    it('POST /api/planner/plans should create a plan', async () => {
+      const { status, data } = await post('/api/planner/plans', { goal: 'Test plan', steps: [{ description: 'Step 1' }, { description: 'Step 2' }] });
+      expect(status).toBe(200);
+      expect(data.plan).toBeDefined();
+      expect(data.plan.goal).toBe('Test plan');
+    });
+  });
+
+  // ─── API Keys ─────────────────────────────────────
+  describe('API Keys', () => {
+    it('GET /api/keys should return keys and scopes', async () => {
+      const { status, data } = await get('/api/keys');
+      expect(status).toBe(200);
+      expect(data.keys).toBeInstanceOf(Array);
+      expect(data.scopes).toBeInstanceOf(Array);
+      expect(data.scopes.length).toBeGreaterThan(0);
+    });
+
+    it('POST /api/keys should create an API key', async () => {
+      const { status, data } = await post('/api/keys', { name: 'test-key', scopes: ['chat', 'tools'] });
+      expect(status).toBe(200);
+      expect(data.key).toBeDefined();
+      expect(data.key.name).toBe('test-key');
+    });
+  });
+
+  // ─── GDPR ─────────────────────────────────────────
+  describe('GDPR', () => {
+    it('GET /api/gdpr/status should return GDPR status', async () => {
+      const { status, data } = await get('/api/gdpr/status');
+      expect(status).toBe(200);
+      expect(data.status).toBeDefined();
+    });
+  });
+
+  // ─── GitHub Integration ───────────────────────────
+  describe('GitHub', () => {
+    it('GET /api/integrations/github/status should return config status', async () => {
+      const { status, data } = await get('/api/integrations/github/status');
+      expect(status).toBe(200);
+      expect(typeof data.configured).toBe('boolean');
+    });
+  });
+
+  // ─── RSS Feeds ────────────────────────────────────
+  describe('RSS', () => {
+    it('GET /api/integrations/rss/feeds should return feeds list', async () => {
+      const { status, data } = await get('/api/integrations/rss/feeds');
+      expect(status).toBe(200);
+      expect(data.feeds).toBeInstanceOf(Array);
+    });
+  });
+});
