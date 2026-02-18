@@ -289,6 +289,37 @@ export function SettingsPage() {
               </div>
             </div>
           ))}
+
+          {/* RBAC Hard Enforcement toggle */}
+          {(() => {
+            const rbacSvc = services.find(s => s.name === 'rbac-enforce');
+            const isEnforced = rbacSvc?.value ?? false;
+            return (
+              <div className="flex items-center justify-between p-4 border-t border-zinc-800">
+                <div>
+                  <p className="text-sm text-white font-medium">RBAC Hard Enforcement</p>
+                  <p className="text-xs text-zinc-500">Block all anonymous requests to admin routes (403). Requires auth tokens.</p>
+                </div>
+                <button
+                  aria-label="Toggle RBAC hard enforcement"
+                  onClick={async () => {
+                    await fetch('/api/services/rbac-enforce', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ value: String(!isEnforced) }),
+                    });
+                    loadServices();
+                  }}
+                  className={`w-10 h-6 rounded-full relative cursor-pointer transition-colors ${
+                    isEnforced ? 'bg-red-500' : 'bg-zinc-700'
+                  }`}>
+                  <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
+                    isEnforced ? 'right-1' : 'left-1'
+                  }`} />
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Security Webhook URL */}
