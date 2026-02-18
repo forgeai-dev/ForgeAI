@@ -1,35 +1,42 @@
 ## Description
 
-Brief description of what this PR does.
-
-## Related Issue
-
-Closes #(issue number)
+<!-- What does this PR do? Keep it concise. -->
 
 ## Type of Change
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor (no functional changes)
-- [ ] Documentation
-- [ ] Tests
+- [ ] 🐛 Bug fix
+- [ ] ✨ New feature
+- [ ] ♻️ Refactor (no functional changes)
+- [ ] 📝 Documentation
+- [ ] 🧪 Tests
+- [ ] 🔒 Security
 
 ## Changes Made
 
-- Change 1
-- Change 2
+<!-- List the key changes. Be specific. -->
+
+-
 
 ## How to Test
 
-1. Step 1
-2. Step 2
+<!-- Steps to verify this PR works correctly. -->
 
-## Screenshots (if UI changes)
+1. `pnpm -r build`
+2. `pnpm forge start --migrate`
+3.
+
+## Related Issue
+
+<!-- Link related issues. Use "Closes #123" to auto-close. Remove if none. -->
+
+## Screenshots
+
+<!-- Attach screenshots if there are UI changes. Remove section if not applicable. -->
 
 ## Checklist
 
-- [ ] Code builds without errors (`pnpm build`)
+- [ ] Code builds without errors (`pnpm -r build`)
 - [ ] Tests pass (`pnpm test`)
-- [ ] Type check passes (`pnpm lint`)
-- [ ] Commit messages follow convention
+- [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+- [ ] No secrets or API keys committed
 - [ ] Documentation updated (if needed)
