@@ -2,7 +2,7 @@ export { Vault, createVault } from './vault.js';
 export { RBACEngine, RBACDeniedError, createRBACEngine } from './rbac.js';
 export { RateLimiter, createRateLimiter } from './rate-limiter.js';
 export { AuditLogger, createAuditLogger } from './audit-logger.js';
-export type { AuditLogStore, AuditQueryFilters } from './audit-logger.js';
+export type { AuditLogStore, AuditQueryFilters, SecurityAlertHandler } from './audit-logger.js';
 export { PromptGuard, createPromptGuard } from './prompt-guard.js';
 export { JWTAuth, AuthError, createJWTAuth } from './jwt-auth.js';
 export { TwoFactorAuth, createTwoFactorAuth } from './two-factor.js';

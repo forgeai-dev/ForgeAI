@@ -28,7 +28,11 @@ export type AuditAction =
   | 'backup.vault.export'
   | 'backup.vault.import'
   | 'backup.restore'
-  | 'rate_limit.config';
+  | 'rate_limit.config'
+  | 'security.alert_sent'
+  | 'security.integrity_check'
+  | 'security.rbac_denied'
+  | 'audit.export';
 
 export interface AuditLogEntry {
   id: string;
@@ -43,6 +47,27 @@ export interface AuditLogEntry {
   userAgent?: string;
   success: boolean;
   riskLevel: RiskLevel;
+  hash?: string;
+  previousHash?: string;
+}
+
+export interface SecurityAlert {
+  id: string;
+  timestamp: Date;
+  severity: 'warning' | 'critical';
+  title: string;
+  message: string;
+  auditEntryId: string;
+  notified: boolean;
+}
+
+export interface AuditIntegrityResult {
+  valid: boolean;
+  totalEntries: number;
+  checkedEntries: number;
+  brokenAt?: string;
+  brokenEntryId?: string;
+  message: string;
 }
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';

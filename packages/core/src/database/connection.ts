@@ -86,11 +86,15 @@ export async function runMigrations(): Promise<void> {
       logger.info('Migration 001_initial_schema applied');
     }
 
-    if (currentVersion === 0) {
-      logger.info('All migrations applied successfully');
-    } else {
-      logger.info('No pending migrations');
+    // Migration 3: Audit Hash Chain
+    if (currentVersion < 3) {
+      logger.info('Applying migration 003_audit_hash_chain...');
+      await applyMigration003(database);
+      await database('forgeai_migrations').insert({ version: 3, name: '003_audit_hash_chain' });
+      logger.info('Migration 003_audit_hash_chain applied');
     }
+
+    logger.info('All migrations applied successfully');
   } catch (error) {
     logger.error('Migration failed', error);
     throw error;
@@ -235,6 +239,18 @@ async function applyMigration001(db: Knex): Promise<void> {
     table.index('key');
     table.index('window_end');
   });
+}
+
+async function applyMigration003(db: Knex): Promise<void> {
+  const hasHash = await db.schema.hasColumn('audit_log', 'hash');
+  if (!hasHash) {
+    await db.schema.alterTable('audit_log', (table) => {
+      table.string('hash', 64).nullable();
+      table.string('previous_hash', 64).nullable();
+      table.index('hash');
+    });
+    logger.info('Added hash chain columns to audit_log');
+  }
 }
 
 export async function closeDatabase(): Promise<void> {

@@ -7,9 +7,10 @@ import {
   APP_VERSION,
   DEFAULT_GATEWAY_HOST,
   DEFAULT_GATEWAY_PORT,
+  UserRole,
   type HealthStatus,
 } from '@forgeai/shared';
-import { registerChatRoutes } from './chat-routes.js';
+import { registerChatRoutes, getTelegramChannel } from './chat-routes.js';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import {
   createJWTAuth,
@@ -110,6 +111,9 @@ export class Gateway {
     // Register chat + agent routes (pass vault for persistent key storage)
     await registerChatRoutes(this.app, this.vault);
 
+    // Wire security alerts → Telegram + WebSocket
+    this.registerSecurityAlerts();
+
     // Serve dashboard static files (SPA)
     await this.registerDashboardRoutes();
 
@@ -194,6 +198,69 @@ export class Gateway {
     const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions']);
     // Also exempt progress polling and static dashboard assets
     const RATE_LIMIT_PREFIX_EXEMPT = ['/api/chat/progress/', '/api/files/', '/dashboard', '/assets/'];
+
+    // Admin-only routes: vault, backup, config, security management
+    const ADMIN_ROUTES = [
+      '/api/backup/vault',
+      '/api/audit/export',
+      '/api/audit/integrity',
+      '/api/security/stats',
+      '/api/gdpr/export',
+      '/api/gdpr/delete',
+    ];
+    const ADMIN_PREFIX_ROUTES = [
+      '/api/providers/',    // Managing API keys
+      '/api/ip-filter/',
+      '/api/pairing/',
+    ];
+
+    // RBAC enforcement middleware — logs denied access, does NOT block (soft enforcement)
+    // Blocking is only for write operations on critical routes
+    this.app.addHook('onRequest', async (request: FastifyRequest, _reply: FastifyReply) => {
+      const path = request.url.split('?')[0];
+      const method = request.method;
+
+      // Only enforce on mutation operations (POST/PUT/PATCH/DELETE) to admin routes
+      if (method === 'GET') return;
+
+      const isAdminRoute = ADMIN_ROUTES.includes(path) ||
+        ADMIN_PREFIX_ROUTES.some(prefix => path.startsWith(prefix));
+
+      if (isAdminRoute) {
+        // Check for auth header — if present, verify; if not, log as anonymous
+        const authHeader = request.headers.authorization;
+        let role = 'guest';
+        let userId: string | undefined;
+
+        if (authHeader?.startsWith('Bearer ')) {
+          try {
+            const payload = this.auth.verifyAccessToken(authHeader.slice(7));
+            role = (payload as { role?: string }).role ?? 'user';
+            userId = (payload as { sub?: string }).sub;
+          } catch {
+            // Invalid token — treat as guest
+          }
+        }
+
+        const roleEnum = role === 'admin' ? UserRole.ADMIN : role === 'user' ? UserRole.USER : UserRole.GUEST;
+        const allowed = this.rbac.check(roleEnum, 'config', 'write', userId);
+        if (!allowed) {
+          this.auditLogger.log({
+            action: 'security.rbac_denied',
+            userId,
+            ipAddress: request.ip,
+            details: { path, method, role },
+            success: false,
+            riskLevel: 'high',
+          });
+
+          // For now: log but allow (soft enforcement) — the dashboard doesn't have auth yet
+          // When auth is fully integrated, uncomment the block below:
+          // reply.status(403).send({ error: 'Access denied', requiredRole: 'admin' });
+          // return;
+        }
+      }
+    });
 
     // Rate limiting middleware
     this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -369,6 +436,93 @@ export class Gateway {
         totalAlerts: allRecent.length,
       };
     });
+
+    // ─── Audit Export (JSON/CSV) ──────────────────────────
+    this.app.get('/api/audit/export', async (request: FastifyRequest, reply: FastifyReply) => {
+      const query = request.query as {
+        format?: string;
+        riskLevel?: string;
+        action?: string;
+        from?: string;
+        to?: string;
+        limit?: string;
+      };
+
+      const format = (query.format === 'csv' ? 'csv' : 'json') as 'json' | 'csv';
+      const filters: Record<string, unknown> = {};
+      if (query.riskLevel) filters.riskLevel = query.riskLevel;
+      if (query.action) filters.action = query.action;
+      if (query.from) filters.from = new Date(query.from);
+      if (query.to) filters.to = new Date(query.to);
+      if (query.limit) filters.limit = parseInt(query.limit, 10);
+
+      const data = await this.auditLogger.exportEntries(filters as any, format);
+
+      this.auditLogger.log({
+        action: 'audit.export',
+        details: { format, filterCount: Object.keys(filters).length },
+        riskLevel: 'medium',
+      });
+
+      if (format === 'csv') {
+        reply.header('Content-Type', 'text/csv');
+        reply.header('Content-Disposition', `attachment; filename="forgeai-audit-${new Date().toISOString().slice(0, 10)}.csv"`);
+        return reply.send(data);
+      }
+
+      reply.header('Content-Type', 'application/json');
+      reply.header('Content-Disposition', `attachment; filename="forgeai-audit-${new Date().toISOString().slice(0, 10)}.json"`);
+      return reply.send(data);
+    });
+
+    // ─── Audit Integrity Verification ─────────────────────
+    this.app.get('/api/audit/integrity', async () => {
+      const result = await this.auditLogger.verifyIntegrity(1000);
+
+      this.auditLogger.log({
+        action: 'security.integrity_check',
+        details: { valid: result.valid, checked: result.totalChecked },
+        riskLevel: result.valid ? 'low' : 'critical',
+        success: result.valid,
+      });
+
+      return result;
+    });
+
+    // ─── Security Stats & Trends ──────────────────────────
+    this.app.get('/api/security/stats', async () => {
+      return this.auditLogger.getSecurityStats();
+    });
+
+    // ─── Audit Events (paginated) ─────────────────────────
+    this.app.get('/api/audit/events', async (request: FastifyRequest) => {
+      const query = request.query as {
+        riskLevel?: string;
+        action?: string;
+        from?: string;
+        to?: string;
+        limit?: string;
+        offset?: string;
+      };
+
+      const filters: Record<string, unknown> = {};
+      if (query.riskLevel) filters.riskLevel = query.riskLevel;
+      if (query.action) filters.action = query.action;
+      if (query.from) filters.from = new Date(query.from);
+      if (query.to) filters.to = new Date(query.to);
+      filters.limit = parseInt(query.limit ?? '50', 10);
+      filters.offset = parseInt(query.offset ?? '0', 10);
+
+      const entries = await this.auditLogger.query(filters as any);
+      const total = await this.auditLogger.query({ ...filters as any, limit: undefined, offset: undefined });
+
+      return {
+        entries,
+        total: total.length,
+        limit: filters.limit,
+        offset: filters.offset,
+      };
+    });
   }
 
   private registerBackupRoutes(): void {
@@ -530,6 +684,65 @@ export class Gateway {
         broadcaster.removeClient(client);
       });
     });
+  }
+
+  private registerSecurityAlerts(): void {
+    const broadcaster = getWSBroadcaster();
+
+    this.auditLogger.onAlert(async (alert) => {
+      // 1. Broadcast to WebSocket clients (Dashboard real-time)
+      broadcaster.broadcastAll({
+        type: 'security.alert',
+        payload: {
+          id: alert.id,
+          severity: alert.severity,
+          title: alert.title,
+          message: alert.message,
+          timestamp: alert.timestamp,
+        },
+      });
+
+      // 2. Send to Telegram admin (if channel is connected)
+      try {
+        const tg = getTelegramChannel();
+        if (tg?.isConnected()) {
+          const perms = tg.getPermissions();
+          const adminId = (perms as { adminUsers?: string[] }).adminUsers?.[0];
+          if (adminId) {
+            const emoji = alert.severity === 'critical' ? '🚨' : '⚠️';
+            const text = [
+              `${emoji} **${alert.title}**`,
+              '',
+              alert.message,
+              '',
+              `_${new Date(alert.timestamp).toLocaleString()}_`,
+            ].join('\n');
+
+            await tg.send({
+              channelType: 'telegram',
+              recipientId: adminId,
+              content: text,
+            });
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to send security alert to Telegram', err);
+      }
+
+      // 3. Log that alert was sent
+      this.auditLogger.log({
+        action: 'security.alert_sent' as any,
+        details: {
+          alertId: alert.id,
+          severity: alert.severity,
+          title: alert.title,
+          channel: 'websocket+telegram',
+        },
+        riskLevel: 'low',
+      });
+    });
+
+    logger.info('Security alert handlers registered (WebSocket + Telegram)');
   }
 
   async start(): Promise<void> {

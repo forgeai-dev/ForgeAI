@@ -19,6 +19,8 @@ export class MySQLAuditStore implements AuditLogStore {
       user_agent: entry.userAgent,
       success: entry.success,
       risk_level: entry.riskLevel,
+      hash: entry.hash ?? null,
+      previous_hash: entry.previousHash ?? null,
     });
   }
 
@@ -53,6 +55,8 @@ export class MySQLAuditStore implements AuditLogStore {
       userAgent: row['user_agent'] as string | undefined,
       success: Boolean(row['success']),
       riskLevel: row['risk_level'] as AuditLogEntry['riskLevel'],
+      hash: row['hash'] as string | undefined,
+      previousHash: row['previous_hash'] as string | undefined,
     }));
   }
 

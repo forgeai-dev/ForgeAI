@@ -80,6 +80,10 @@ export function getWorkflowEngine(): WorkflowEngine | null {
   return workflowEngine;
 }
 
+export function getTelegramChannel(): TelegramChannel | null {
+  return telegramChannel;
+}
+
 export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): Promise<void> {
   // Initialize LLM Router (starts empty — no env var auto-registration)
   const router = createLLMRouter();

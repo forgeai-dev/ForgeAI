@@ -1,5 +1,6 @@
-import type { AuditLogEntry, AuditAction, RiskLevel } from '@forgeai/shared';
+import type { AuditLogEntry, AuditAction, RiskLevel, SecurityAlert } from '@forgeai/shared';
 import { createLogger, generateId } from '@forgeai/shared';
+import { createHash } from 'node:crypto';
 
 const logger = createLogger('Security:AuditLogger');
 
@@ -21,11 +22,15 @@ export interface AuditQueryFilters {
   offset?: number;
 }
 
+export type SecurityAlertHandler = (alert: SecurityAlert) => void | Promise<void>;
+
 export class AuditLogger {
   private store: AuditLogStore | null = null;
   private buffer: AuditLogEntry[] = [];
   private flushInterval: ReturnType<typeof setInterval> | null = null;
   private maxBufferSize: number;
+  private lastHash: string = '0'.repeat(64);
+  private alertHandlers: SecurityAlertHandler[] = [];
 
   constructor(maxBufferSize: number = 100) {
     this.maxBufferSize = maxBufferSize;
@@ -63,7 +68,12 @@ export class AuditLogger {
       userAgent: params.userAgent,
       success: params.success ?? true,
       riskLevel: params.riskLevel ?? this.inferRiskLevel(params.action, params.success ?? true),
+      previousHash: this.lastHash,
     };
+
+    // Compute hash chain: SHA-256(previousHash + id + timestamp + action + riskLevel)
+    entry.hash = this.computeHash(entry);
+    this.lastHash = entry.hash;
 
     this.buffer.push(entry);
 
@@ -74,6 +84,9 @@ export class AuditLogger {
         riskLevel: entry.riskLevel,
         success: entry.success,
       });
+
+      // Fire security alerts for high/critical events
+      this.fireAlert(entry);
     }
 
     if (this.buffer.length >= this.maxBufferSize) {
@@ -149,6 +162,195 @@ export class AuditLogger {
 
   getBufferSize(): number {
     return this.buffer.length;
+  }
+
+  private computeHash(entry: AuditLogEntry): string {
+    const payload = `${entry.previousHash}|${entry.id}|${entry.timestamp.toISOString()}|${entry.action}|${entry.riskLevel}|${entry.success}`;
+    return createHash('sha256').update(payload).digest('hex');
+  }
+
+  // ─── Security Alerts ────────────────────────────────
+
+  onAlert(handler: SecurityAlertHandler): void {
+    this.alertHandlers.push(handler);
+  }
+
+  private fireAlert(entry: AuditLogEntry): void {
+    if (this.alertHandlers.length === 0) return;
+
+    const alert: SecurityAlert = {
+      id: generateId('alert'),
+      timestamp: entry.timestamp,
+      severity: entry.riskLevel === 'critical' ? 'critical' : 'warning',
+      title: this.getAlertTitle(entry.action),
+      message: this.formatAlertMessage(entry),
+      auditEntryId: entry.id,
+      notified: false,
+    };
+
+    for (const handler of this.alertHandlers) {
+      try {
+        const result = handler(alert);
+        if (result instanceof Promise) result.catch(err => logger.error('Alert handler failed', err));
+      } catch (err) {
+        logger.error('Alert handler failed (sync)', err);
+      }
+    }
+  }
+
+  private getAlertTitle(action: AuditAction): string {
+    const titles: Partial<Record<AuditAction, string>> = {
+      'prompt_injection.detected': '🛡️ Prompt Injection Detected',
+      'rate_limit.exceeded': '⚡ Rate Limit Exceeded',
+      'sandbox.violation': '🔒 Sandbox Violation',
+      'auth.login_failed': '🔑 Authentication Failed',
+      'auth.2fa_failed': '🔑 2FA Verification Failed',
+      'tool.blocked': '🚫 Tool Execution Blocked',
+      'anomaly.detected': '⚠️ Anomaly Detected',
+      'vault.update': '🔐 Vault Modified',
+      'user.delete': '👤 User Deleted',
+      'config.update': '⚙️ Configuration Changed',
+      'security.rbac_denied': '🚫 Access Denied (RBAC)',
+    };
+    return titles[action] ?? `⚠️ Security Event: ${action}`;
+  }
+
+  private formatAlertMessage(entry: AuditLogEntry): string {
+    const parts = [
+      `Action: ${entry.action}`,
+      `Risk: ${entry.riskLevel.toUpperCase()}`,
+      `Status: ${entry.success ? 'OK' : 'BLOCKED'}`,
+    ];
+    if (entry.userId) parts.push(`User: ${entry.userId}`);
+    if (entry.ipAddress) parts.push(`IP: ${entry.ipAddress}`);
+    if (entry.channelType) parts.push(`Channel: ${entry.channelType}`);
+    if (entry.details && Object.keys(entry.details).length > 0) {
+      parts.push(`Details: ${JSON.stringify(entry.details)}`);
+    }
+    return parts.join('\n');
+  }
+
+  // ─── Integrity Verification ─────────────────────────
+
+  async verifyIntegrity(limit: number = 1000): Promise<{
+    valid: boolean;
+    totalChecked: number;
+    brokenAtId?: string;
+    brokenAtIndex?: number;
+    message: string;
+  }> {
+    if (!this.store) {
+      return { valid: false, totalChecked: 0, message: 'No audit store configured' };
+    }
+
+    // Query entries in chronological order
+    const entries = await this.store.query({
+      limit,
+      offset: 0,
+    });
+
+    // Entries come DESC from store, reverse to ASC
+    entries.reverse();
+
+    if (entries.length === 0) {
+      return { valid: true, totalChecked: 0, message: 'No entries to verify' };
+    }
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (!entry.hash || !entry.previousHash) continue; // Skip legacy entries without hash
+
+      const expectedHash = this.computeHash(entry);
+      if (entry.hash !== expectedHash) {
+        return {
+          valid: false,
+          totalChecked: i + 1,
+          brokenAtId: entry.id,
+          brokenAtIndex: i,
+          message: `Integrity broken at entry ${entry.id} (index ${i}): hash mismatch — possible tampering`,
+        };
+      }
+
+      // Verify chain link (entry[i].previousHash should match entry[i-1].hash)
+      if (i > 0 && entries[i - 1].hash) {
+        if (entry.previousHash !== entries[i - 1].hash) {
+          return {
+            valid: false,
+            totalChecked: i + 1,
+            brokenAtId: entry.id,
+            brokenAtIndex: i,
+            message: `Chain broken at entry ${entry.id} (index ${i}): previousHash does not match prior entry — possible deletion or insertion`,
+          };
+        }
+      }
+    }
+
+    return {
+      valid: true,
+      totalChecked: entries.length,
+      message: `All ${entries.length} entries verified — integrity intact`,
+    };
+  }
+
+  // ─── Export ─────────────────────────────────────────
+
+  async exportEntries(filters: AuditQueryFilters, format: 'json' | 'csv' = 'json'): Promise<string> {
+    const entries = await this.query({ ...filters, limit: filters.limit ?? 10000 });
+
+    if (format === 'csv') {
+      const headers = ['id', 'timestamp', 'action', 'userId', 'sessionId', 'channelType', 'resource', 'success', 'riskLevel', 'ipAddress', 'hash', 'details'];
+      const rows = entries.map(e => [
+        e.id,
+        e.timestamp instanceof Date ? e.timestamp.toISOString() : String(e.timestamp),
+        e.action,
+        e.userId ?? '',
+        e.sessionId ?? '',
+        e.channelType ?? '',
+        e.resource ?? '',
+        String(e.success),
+        e.riskLevel,
+        e.ipAddress ?? '',
+        e.hash ?? '',
+        JSON.stringify(e.details).replace(/"/g, '""'),
+      ]);
+      return [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
+    }
+
+    return JSON.stringify(entries, null, 2);
+  }
+
+  // ─── Stats ──────────────────────────────────────────
+
+  async getSecurityStats(): Promise<{
+    total: number;
+    byRiskLevel: Record<string, number>;
+    byAction: Record<string, number>;
+    recentHighRisk: AuditLogEntry[];
+    alertsSent: number;
+  }> {
+    const total = this.store ? await this.store.count({}) : this.buffer.length;
+
+    const recentAll = await this.query({ limit: 500 });
+
+    const byRiskLevel: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    const byAction: Record<string, number> = {};
+    let alertsSent = 0;
+
+    for (const entry of recentAll) {
+      byRiskLevel[entry.riskLevel] = (byRiskLevel[entry.riskLevel] ?? 0) + 1;
+      byAction[entry.action] = (byAction[entry.action] ?? 0) + 1;
+      if (entry.action === 'security.alert_sent') alertsSent++;
+    }
+
+    const recentHighRisk = recentAll
+      .filter(e => e.riskLevel === 'high' || e.riskLevel === 'critical')
+      .slice(0, 20);
+
+    return { total, byRiskLevel, byAction, recentHighRisk, alertsSent };
+  }
+
+  setLastHash(hash: string): void {
+    this.lastHash = hash;
   }
 
   destroy(): void {
