@@ -382,6 +382,24 @@ describe('ForgeAI Gateway API Tests', () => {
     });
   });
 
+  // ─── Audit Rotation ────────────────────────────────
+  describe('Audit Rotation', () => {
+    it('GET /api/audit/rotation should return rotation status', async () => {
+      const { status, data } = await get('/api/audit/rotation');
+      expect(status).toBe(200);
+      expect(typeof data.totalEntries).toBe('number');
+      expect(data.defaultRetentionDays).toBe(90);
+    });
+
+    it('POST /api/audit/rotate should execute rotation', async () => {
+      const { status, data } = await post('/api/audit/rotate', { retentionDays: 365 });
+      expect(status).toBe(200);
+      expect(typeof data.deleted).toBe('number');
+      expect(typeof data.remaining).toBe('number');
+      expect(data.retentionDays).toBe(365);
+    });
+  });
+
   // ─── Audit Events (paginated) ────────────────────
   describe('Audit Events', () => {
     it('GET /api/audit/events should return paginated entries', async () => {

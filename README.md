@@ -565,6 +565,9 @@ All core features are implemented and tested:
 
 | Feature | Priority |
 |:--------|:---------|
+| RBAC hard enforcement (block 403 when dashboard auth is integrated) | High |
+| Integrity check on gateway startup (auto-verify hash chain on boot) | High |
+| Generic webhook alerts (custom URL for security notifications) | High |
 | Electron desktop app | Medium |
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |

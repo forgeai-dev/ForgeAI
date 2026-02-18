@@ -60,6 +60,11 @@ export class MySQLAuditStore implements AuditLogStore {
     }));
   }
 
+  async deleteOlderThan(date: Date): Promise<number> {
+    const deleted = await this.db('audit_log').where('timestamp', '<', date).delete();
+    return deleted;
+  }
+
   async count(filters: AuditQueryFilters): Promise<number> {
     let query = this.db('audit_log').count('* as total');
 

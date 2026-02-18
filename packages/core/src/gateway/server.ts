@@ -204,6 +204,7 @@ export class Gateway {
       '/api/backup/vault',
       '/api/audit/export',
       '/api/audit/integrity',
+      '/api/audit/rotate',
       '/api/security/stats',
       '/api/gdpr/export',
       '/api/gdpr/delete',
@@ -494,6 +495,22 @@ export class Gateway {
       return this.auditLogger.getSecurityStats();
     });
 
+    // ─── Audit Log Rotation ─────────────────────────────
+    this.app.post('/api/audit/rotate', async (request: FastifyRequest) => {
+      const body = request.body as { retentionDays?: number } | null;
+      const retentionDays = body?.retentionDays ?? 90;
+
+      const result = await this.auditLogger.rotate(retentionDays);
+      return { ...result, retentionDays };
+    });
+
+    this.app.get('/api/audit/rotation', async () => {
+      const total = await this.auditLogger.query({ limit: 1 });
+      const oldest = total.length > 0 ? total[total.length - 1]?.timestamp : null;
+      const count = (await this.auditLogger.getSecurityStats()).total;
+      return { totalEntries: count, oldestEntry: oldest, defaultRetentionDays: 90 };
+    });
+
     // ─── Audit Events (paginated) ─────────────────────────
     this.app.get('/api/audit/events', async (request: FastifyRequest) => {
       const query = request.query as {
@@ -768,6 +785,22 @@ export class Gateway {
       logger.info(`🔥 ${APP_NAME} Gateway running at http://${this.host}:${this.port}`);
       logger.info(`🔌 WebSocket available at ws://${this.host}:${this.port}/ws`);
       logger.info(`🛡️  Security modules: RBAC ✓ | Vault ✓ | RateLimit ✓ | PromptGuard ✓ | AuditLog ✓ | 2FA ✓`);
+
+      // Schedule daily audit log rotation (every 24h, keep 90 days)
+      const ROTATION_INTERVAL = 24 * 60 * 60 * 1000;
+      setInterval(async () => {
+        try {
+          const result = await this.auditLogger.rotate(90);
+          if (result.deleted > 0) {
+            logger.info(`Scheduled audit rotation: ${result.deleted} old entries cleaned`);
+          }
+        } catch (err) {
+          logger.error('Scheduled audit rotation failed', err);
+        }
+      }, ROTATION_INTERVAL);
+
+      // Run rotation once on startup (deferred 30s to not slow boot)
+      setTimeout(() => this.auditLogger.rotate(90).catch(() => {}), 30_000);
     } catch (error) {
       logger.fatal('Failed to start Gateway', error);
       throw error;

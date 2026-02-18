@@ -8,6 +8,7 @@ export interface AuditLogStore {
   insert(entry: AuditLogEntry): Promise<void>;
   query(filters: AuditQueryFilters): Promise<AuditLogEntry[]>;
   count(filters: AuditQueryFilters): Promise<number>;
+  deleteOlderThan?(date: Date): Promise<number>;
 }
 
 export interface AuditQueryFilters {
@@ -347,6 +348,38 @@ export class AuditLogger {
       .slice(0, 20);
 
     return { total, byRiskLevel, byAction, recentHighRisk, alertsSent };
+  }
+
+  // ─── Log Rotation ─────────────────────────────────
+
+  async rotate(retentionDays: number = 90): Promise<{ deleted: number; remaining: number }> {
+    if (!this.store) {
+      return { deleted: 0, remaining: this.buffer.length };
+    }
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+
+    let deleted = 0;
+    if (this.store.deleteOlderThan) {
+      deleted = await this.store.deleteOlderThan(cutoff);
+    } else {
+      logger.warn('Audit store does not support deleteOlderThan — rotation skipped');
+    }
+
+    const remaining = await this.store.count({});
+
+    if (deleted > 0) {
+      logger.info(`Audit log rotation: deleted ${deleted} entries older than ${retentionDays} days, ${remaining} remaining`);
+
+      this.log({
+        action: 'config.update',
+        details: { operation: 'audit_rotation', deleted, remaining, retentionDays, cutoff: cutoff.toISOString() },
+        riskLevel: 'medium',
+      });
+    }
+
+    return { deleted, remaining };
   }
 
   setLastHash(hash: string): void {
