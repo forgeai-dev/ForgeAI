@@ -7,6 +7,11 @@ async function get(path: string) {
   return { status: res.status, data: await res.json() };
 }
 
+async function getRaw(path: string) {
+  const res = await fetch(`${BASE}${path}`);
+  return { status: res.status, text: await res.text(), headers: res.headers };
+}
+
 async function post(path: string, body?: unknown) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -327,6 +332,71 @@ describe('ForgeAI Gateway API Tests', () => {
       const { status, data } = await get('/api/integrations/rss/feeds');
       expect(status).toBe(200);
       expect(data.feeds).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Security Summary ────────────────────────────
+  describe('Security Summary', () => {
+    it('GET /api/security/summary should return security overview', async () => {
+      const { status, data } = await get('/api/security/summary');
+      expect(status).toBe(200);
+      expect(data.modules).toBeDefined();
+      expect(data.counts).toBeDefined();
+      expect(data.events).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Security Stats ──────────────────────────────
+  describe('Security Stats', () => {
+    it('GET /api/security/stats should return breakdown', async () => {
+      const { status, data } = await get('/api/security/stats');
+      expect(status).toBe(200);
+      expect(data.byRiskLevel).toBeDefined();
+      expect(data.byAction).toBeDefined();
+      expect(data.recentHighRisk).toBeInstanceOf(Array);
+    });
+  });
+
+  // ─── Audit Integrity ─────────────────────────────
+  describe('Audit Integrity', () => {
+    it('GET /api/audit/integrity should verify hash chain', async () => {
+      const { status, data } = await get('/api/audit/integrity');
+      expect(status).toBe(200);
+      expect(typeof data.valid).toBe('boolean');
+      expect(typeof data.totalChecked).toBe('number');
+    });
+  });
+
+  // ─── Audit Export ─────────────────────────────────
+  describe('Audit Export', () => {
+    it('GET /api/audit/export?format=json should return JSON', async () => {
+      const { status, data } = await get('/api/audit/export?format=json&limit=5');
+      expect(status).toBe(200);
+      expect(data).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/audit/export?format=csv should return CSV', async () => {
+      const { status, text } = await getRaw('/api/audit/export?format=csv&limit=5');
+      expect(status).toBe(200);
+      expect(text).toContain('id,timestamp,action');
+    });
+  });
+
+  // ─── Audit Events (paginated) ────────────────────
+  describe('Audit Events', () => {
+    it('GET /api/audit/events should return paginated entries', async () => {
+      const { status, data } = await get('/api/audit/events?limit=10&offset=0');
+      expect(status).toBe(200);
+      expect(data.entries).toBeInstanceOf(Array);
+      expect(typeof data.total).toBe('number');
+      expect(data.limit).toBe(10);
+      expect(data.offset).toBe(0);
+    });
+
+    it('GET /api/audit/events should support riskLevel filter', async () => {
+      const { status, data } = await get('/api/audit/events?riskLevel=high&limit=5');
+      expect(status).toBe(200);
+      expect(data.entries).toBeInstanceOf(Array);
     });
   });
 });

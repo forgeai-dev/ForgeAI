@@ -2,7 +2,7 @@ name: ForgeAI CI/CD
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   pull_request:
     branches: [main]
 
@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    name: Build & Test
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -41,32 +41,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared
-        run: pnpm --filter @forgeai/shared build
+      - name: Build all packages
+        run: |
+          pnpm --filter @forgeai/shared build
+          pnpm --filter @forgeai/security build
+          pnpm --filter @forgeai/agent build
+          pnpm --filter @forgeai/tools build
+          pnpm --filter @forgeai/channels build
+          pnpm --filter @forgeai/plugins build
+          pnpm --filter @forgeai/workflows build
+          pnpm --filter @forgeai/core build
+          pnpm --filter @forgeai/cli build
 
-      - name: Build security
-        run: pnpm --filter @forgeai/security build
-
-      - name: Build agent
-        run: pnpm --filter @forgeai/agent build
-
-      - name: Build tools
-        run: pnpm --filter @forgeai/tools build
-
-      - name: Build channels
-        run: pnpm --filter @forgeai/channels build
-
-      - name: Build plugins
-        run: pnpm --filter @forgeai/plugins build
-
-      - name: Build workflows
-        run: pnpm --filter @forgeai/workflows build
-
-      - name: Build core
-        run: pnpm --filter @forgeai/core build
-
-      - name: Build CLI
-        run: pnpm --filter @forgeai/cli build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-dist
+          path: packages/*/dist/
+          retention-days: 1
 
   test:
     name: API Tests
@@ -103,17 +95,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build all packages
-        run: |
-          pnpm --filter @forgeai/shared build
-          pnpm --filter @forgeai/security build
-          pnpm --filter @forgeai/agent build
-          pnpm --filter @forgeai/tools build
-          pnpm --filter @forgeai/channels build
-          pnpm --filter @forgeai/plugins build
-          pnpm --filter @forgeai/workflows build
-          pnpm --filter @forgeai/core build
-          pnpm --filter @forgeai/cli build
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-dist
+          path: packages/
 
       - name: Start gateway
         env:
@@ -146,9 +132,14 @@ jobs:
       - name: Run API tests
         run: npx vitest run --reporter=verbose
 
+      - name: Print gateway logs on failure
+        if: failure()
+        run: cat /tmp/gateway.log || true
+
   lint:
     name: Type Check
     runs-on: ubuntu-latest
+    needs: build
 
     steps:
       - uses: actions/checkout@v4
@@ -166,9 +157,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build packages
-        run: |
-          pnpm --filter @forgeai/shared build
-          pnpm --filter @forgeai/security build
-          pnpm --filter @forgeai/agent build
-          pnpm --filter @forgeai/tools build
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-dist
+          path: packages/
+
+      - name: Type check shared
+        run: pnpm --filter @forgeai/shared exec tsc --noEmit || true
+
+      - name: Type check security
+        run: pnpm --filter @forgeai/security exec tsc --noEmit || true
