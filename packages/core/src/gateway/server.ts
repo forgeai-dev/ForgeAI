@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import multipart from '@fastify/multipart';
 import {
   createLogger,
   APP_NAME,
@@ -99,6 +100,7 @@ export class Gateway {
     });
 
     await this.app.register(websocket);
+    await this.app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
 
     // Register routes
     this.registerHealthRoutes();

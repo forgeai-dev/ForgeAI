@@ -553,7 +553,7 @@ pnpm forge status      # Quick status check
 
 ## 🗺 Roadmap
 
-### Completed — 25 Phases
+### Completed — 26 Phases
 
 All core features are implemented and tested:
 
@@ -561,7 +561,7 @@ All core features are implemented and tested:
 - **Agent** — Multi-LLM router (9 providers incl. Ollama local), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
 - **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
-- **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
+- **Dashboard** — 18 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
@@ -569,6 +569,7 @@ All core features are implemented and tested:
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
 - **Configurable Models** — All 9 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
+- **RAG Engine Upgrade** — Persistence (JSON to disk, auto-load on startup), runtime config API, file upload (PDF/TXT/MD/code), OpenAI embeddings support, dashboard RAG page (18th page)
 
 ### What's Next
 

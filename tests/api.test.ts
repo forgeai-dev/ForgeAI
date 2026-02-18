@@ -272,6 +272,25 @@ describe('ForgeAI Gateway API Tests', () => {
       expect(status).toBe(200);
       expect(data.documents).toBeInstanceOf(Array);
     });
+
+    it('GET /api/rag/config should return config with all fields', async () => {
+      const { status, data } = await get('/api/rag/config');
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(typeof data.config.chunkSize).toBe('number');
+      expect(typeof data.config.similarityThreshold).toBe('number');
+      expect(typeof data.config.embeddingProvider).toBe('string');
+      expect(typeof data.config.persist).toBe('boolean');
+    });
+
+    it('POST /api/rag/config should update config', async () => {
+      const { status, data } = await post('/api/rag/config', { maxResults: 10 });
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(data.config.maxResults).toBe(10);
+      // Reset back
+      await post('/api/rag/config', { maxResults: 5 });
+    });
   });
 
   // ─── Auto-Planner ────────────────────────────────

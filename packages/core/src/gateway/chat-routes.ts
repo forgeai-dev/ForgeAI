@@ -8,7 +8,7 @@ import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, typ
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault } from '@forgeai/security';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
-import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, createAutoPlanner, type AutoPlanner } from '@forgeai/agent';
+import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
@@ -2435,6 +2435,55 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     if (!ragEngine) return { error: 'RAG not initialized' };
     const { id } = request.params as { id: string };
     return { deleted: ragEngine.remove(id) };
+  });
+
+  // GET /api/rag/config — get current config
+  app.get('/api/rag/config', async () => {
+    if (!ragEngine) return { config: {} };
+    return { config: ragEngine.getConfig() };
+  });
+
+  // POST /api/rag/config — update config at runtime
+  app.post('/api/rag/config', async (request: FastifyRequest) => {
+    if (!ragEngine) return { error: 'RAG not initialized' };
+    const body = request.body as Record<string, unknown>;
+    const config = ragEngine.updateConfig(body);
+    return { config };
+  });
+
+  // POST /api/rag/upload — upload a file to ingest into RAG
+  app.post('/api/rag/upload', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!ragEngine) { reply.status(503).send({ error: 'RAG not initialized' }); return; }
+
+    const data = await request.file();
+    if (!data) { reply.status(400).send({ error: 'No file uploaded' }); return; }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of data.file) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+    const filename = data.filename || 'unknown.txt';
+
+    const text = extractTextFromFile(filename, buffer);
+    if (text.startsWith('[') && text.endsWith(']')) {
+      reply.status(400).send({ error: text });
+      return;
+    }
+
+    const id = data.fields?.id
+      ? String((data.fields.id as any).value || generateId())
+      : filename.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const metadata: Record<string, unknown> = {
+      title: filename,
+      filename,
+      size: buffer.length,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    const doc = await ragEngine.ingestAsync(id, text, metadata);
+    return { document: { id: doc.id, chunks: doc.chunks.length, metadata: doc.metadata, contentLength: text.length } };
   });
 
   // ─── Auto-Planning ────────────────────────────────

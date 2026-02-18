@@ -13,6 +13,7 @@ const navItems = [
   { to: '/workspace', label: 'Workspace', icon: Brain },
   { to: '/gmail', label: 'Gmail', icon: Mail },
   { to: '/memory', label: 'Memory', icon: Database },
+  { to: '/rag', label: 'RAG', icon: Database },
   { to: '/api-keys', label: 'API Keys', icon: Key },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },

@@ -10,20 +10,21 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@forgeai/shared": "workspace:*",
-    "@forgeai/security": "workspace:*",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/multipart": "^9.4.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "@fastify/websocket": "^11.0.0",
     "@forgeai/agent": "workspace:*",
     "@forgeai/channels": "workspace:*",
-    "@forgeai/tools": "workspace:*",
     "@forgeai/plugins": "workspace:*",
+    "@forgeai/security": "workspace:*",
+    "@forgeai/shared": "workspace:*",
+    "@forgeai/tools": "workspace:*",
     "@forgeai/workflows": "workspace:*",
+    "dotenv": "^16.4.0",
     "fastify": "^5.2.0",
-    "@fastify/cors": "^10.0.0",
-    "@fastify/websocket": "^11.0.0",
-    "@fastify/rate-limit": "^10.0.0",
     "knex": "^3.1.0",
-    "mysql2": "^3.11.0",
-    "dotenv": "^16.4.0"
+    "mysql2": "^3.11.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
