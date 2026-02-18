@@ -17,6 +17,7 @@ export interface LLMProviderAdapter {
   chat(request: LLMRequest): Promise<LLMResponse>;
   chatStream(request: LLMRequest): AsyncGenerator<string, LLMResponse>;
   listModels(): string[];
+  setModels?(models: string[]): void;
   getBalance?(): Promise<ProviderBalance>;
 }
 

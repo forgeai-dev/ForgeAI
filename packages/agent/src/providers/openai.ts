@@ -6,12 +6,19 @@ import { LLMProviderError } from './base.js';
 const logger = createLogger('Agent:OpenAI');
 
 const OPENAI_MODELS = [
+  'gpt-5.2',
+  'gpt-5.2-pro',
+  'gpt-5.1',
+  'gpt-5',
+  'gpt-5-mini',
+  'gpt-5-nano',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'gpt-4.1-nano',
   'gpt-4o',
   'gpt-4o-mini',
-  'gpt-4-turbo',
-  'o1',
-  'o1-mini',
-  'o3-mini',
+  'o3-pro',
+  'o4-mini',
 ];
 
 interface OpenAIMessage {
@@ -57,6 +64,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
 
   private apiKey: string;
   private baseUrl: string;
+  private customModels: string[] | null = null;
 
   constructor(apiKey?: string, baseUrl?: string) {
     this.apiKey = apiKey || process.env['OPENAI_API_KEY'] || '';
@@ -68,7 +76,11 @@ export class OpenAIProvider implements LLMProviderAdapter {
   }
 
   listModels(): string[] {
-    return [...OPENAI_MODELS];
+    return this.customModels ? [...this.customModels] : [...OPENAI_MODELS];
+  }
+
+  setModels(models: string[]): void {
+    if (models.length > 0) this.customModels = [...models];
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {
