@@ -123,9 +123,25 @@ jobs:
           DB_PASSWORD: forgeai_test
           DB_NAME: forgeai_test
           GATEWAY_PORT: 18800
+          JWT_SECRET: ci-test-jwt-secret-do-not-use-in-prod
+          VAULT_MASTER_PASSWORD: ci-test-vault-password-do-not-use
+          NODE_ENV: test
         run: |
-          node packages/cli/dist/index.js start &
-          sleep 5
+          mkdir -p .forgeai/chat-sessions .forgeai/screenshots .forgeai/workspace .forgeai/uploads
+          node packages/cli/dist/index.js start --migrate > /tmp/gateway.log 2>&1 &
+          echo "Waiting for gateway to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:18800/health > /dev/null 2>&1; then
+              echo "Gateway is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Gateway failed to start. Logs:"
+              cat /tmp/gateway.log
+              exit 1
+            fi
+            sleep 1
+          done
 
       - name: Run API tests
         run: npx vitest run --reporter=verbose
