@@ -215,9 +215,11 @@ export class Gateway {
       '/api/pairing/',
     ];
 
-    // RBAC enforcement middleware — logs denied access, does NOT block (soft enforcement)
-    // Blocking is only for write operations on critical routes
-    this.app.addHook('onRequest', async (request: FastifyRequest, _reply: FastifyReply) => {
+    // RBAC enforcement middleware — hard enforcement when auth token is present
+    // Anonymous requests (no token) are allowed through for backward compatibility
+    // until dashboard authentication is fully integrated.
+    // Toggle: set RBAC_ENFORCE=true in Vault/env to block even anonymous requests.
+    this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
       const path = request.url.split('?')[0];
       const method = request.method;
 
@@ -228,18 +230,19 @@ export class Gateway {
         ADMIN_PREFIX_ROUTES.some(prefix => path.startsWith(prefix));
 
       if (isAdminRoute) {
-        // Check for auth header — if present, verify; if not, log as anonymous
         const authHeader = request.headers.authorization;
         let role = 'guest';
         let userId: string | undefined;
+        let hasToken = false;
 
         if (authHeader?.startsWith('Bearer ')) {
+          hasToken = true;
           try {
             const payload = this.auth.verifyAccessToken(authHeader.slice(7));
             role = (payload as { role?: string }).role ?? 'user';
             userId = (payload as { sub?: string }).sub;
           } catch {
-            // Invalid token — treat as guest
+            // Invalid token — treat as guest with hasToken = true (will be blocked)
           }
         }
 
@@ -250,15 +253,19 @@ export class Gateway {
             action: 'security.rbac_denied',
             userId,
             ipAddress: request.ip,
-            details: { path, method, role },
+            details: { path, method, role, hasToken },
             success: false,
             riskLevel: 'high',
           });
 
-          // For now: log but allow (soft enforcement) — the dashboard doesn't have auth yet
-          // When auth is fully integrated, uncomment the block below:
-          // reply.status(403).send({ error: 'Access denied', requiredRole: 'admin' });
-          // return;
+          // Hard enforcement: block if the request has an auth token (authenticated non-admin)
+          // OR if RBAC_ENFORCE is enabled (block everything including anonymous)
+          const enforceAll = process.env['RBAC_ENFORCE'] === 'true';
+          if (hasToken || enforceAll) {
+            reply.status(403).send({ error: 'Access denied', requiredRole: 'admin', path, method });
+            return;
+          }
+          // Anonymous (no token) — allow through (soft enforcement) until dashboard auth is integrated
         }
       }
     });
