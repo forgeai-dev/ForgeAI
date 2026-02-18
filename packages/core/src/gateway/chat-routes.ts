@@ -130,6 +130,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'ELEVENLABS_API_KEY',
       'STABLE_DIFFUSION_URL',
       'VOICE_ENABLED',
+      'OLLAMA_BASE_URL',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -1336,6 +1337,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'groq', displayName: 'Groq', models: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'], envKey: 'GROQ_API_KEY' },
     { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'codestral-latest'], envKey: 'MISTRAL_API_KEY' },
     { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-3', 'grok-2'], envKey: 'XAI_API_KEY' },
+    { name: 'local', displayName: 'Local LLM (Ollama)', models: ['llama3.1:8b', 'mistral:7b', 'codellama:13b', 'phi3:mini', 'qwen2.5:7b', 'deepseek-r1:8b'], envKey: 'OLLAMA_BASE_URL' },
   ];
 
   app.get('/api/providers/balances', async () => {
@@ -1383,7 +1385,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     // Create provider instance and validate API key before saving
     try {
-      const { GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OpenAIProvider, AnthropicProvider } = await import('@forgeai/agent');
+      const { GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OpenAIProvider, AnthropicProvider, OllamaProvider } = await import('@forgeai/agent');
       const providerMap: Record<string, () => any> = {
         anthropic: () => new AnthropicProvider(trimmedKey),
         openai: () => new OpenAIProvider(trimmedKey),
@@ -1393,6 +1395,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         groq: () => new GroqProvider(trimmedKey),
         deepseek: () => new DeepSeekProvider(trimmedKey),
         xai: () => new XAIProvider(trimmedKey),
+        local: () => new OllamaProvider(trimmedKey), // trimmedKey = base URL for local
       };
 
       const factory = providerMap[name];
@@ -1401,21 +1404,34 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       const provider = factory();
 
       // Validate: try listing models or a minimal chat to confirm key works
-      try {
-        await provider.chat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: provider.listModels()[0],
-          maxTokens: 1,
-          temperature: 0,
-        });
-      } catch (validationErr: any) {
-        const errMsg = String(validationErr?.message ?? validationErr);
-        if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Invalid') || errMsg.includes('Unauthorized') || errMsg.includes('invalid_api_key')) {
-          logger.warn(`API key validation failed for ${name}`, { error: errMsg });
-          return { error: `Invalid API key: authentication failed. Please check your key.` };
+      if (name === 'local') {
+        // For local LLMs, validate by fetching model list instead of chat
+        try {
+          const models = await (provider as any).fetchModels();
+          if (!models || models.length === 0) {
+            return { error: `Could not connect to Ollama at ${trimmedKey}. Make sure Ollama is running.` };
+          }
+          logger.info(`Ollama connected: ${models.length} models found`, { models: models.slice(0, 5) });
+        } catch (validationErr: any) {
+          return { error: `Could not connect to Ollama at ${trimmedKey}: ${validationErr.message}` };
         }
-        // Other errors (rate limit, model not found, etc.) — key is likely valid
-        logger.debug(`API key validation for ${name} returned non-auth error (key likely valid)`, { error: errMsg });
+      } else {
+        try {
+          await provider.chat({
+            messages: [{ role: 'user', content: 'hi' }],
+            model: provider.listModels()[0],
+            maxTokens: 1,
+            temperature: 0,
+          });
+        } catch (validationErr: any) {
+          const errMsg = String(validationErr?.message ?? validationErr);
+          if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Invalid') || errMsg.includes('Unauthorized') || errMsg.includes('invalid_api_key')) {
+            logger.warn(`API key validation failed for ${name}`, { error: errMsg });
+            return { error: `Invalid API key: authentication failed. Please check your key.` };
+          }
+          // Other errors (rate limit, model not found, etc.) — key is likely valid
+          logger.debug(`API key validation for ${name} returned non-auth error (key likely valid)`, { error: errMsg });
+        }
       }
 
       // Key is valid — persist to Vault and register

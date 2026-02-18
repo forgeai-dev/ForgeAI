@@ -14,6 +14,7 @@ export { MistralProvider } from './providers/mistral.js';
 export { GroqProvider } from './providers/groq.js';
 export { DeepSeekProvider } from './providers/deepseek.js';
 export { XAIProvider } from './providers/xai.js';
+export { OllamaProvider } from './providers/ollama.js';
 export { OpenAICompatibleProvider } from './providers/openai-compatible.js';
 export { LLMProviderError } from './providers/base.js';
 export type { LLMProviderAdapter } from './providers/base.js';

@@ -11,9 +11,10 @@ const PROVIDER_META: Record<string, { display: string; placeholder: string; mode
   groq: { display: 'Groq', placeholder: 'gsk_...', models: 'Llama 3.3 70B, Mixtral 8x7B' },
   mistral: { display: 'Mistral AI', placeholder: 'sk-...', models: 'Mistral Large, Codestral, Pixtral' },
   xai: { display: 'xAI (Grok)', placeholder: 'xai-...', models: 'Grok-3, Grok-2' },
+  local: { display: 'Local LLM (Ollama)', placeholder: 'http://localhost:11434', models: 'Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek' },
 };
 
-const PROVIDER_ORDER = ['anthropic', 'openai', 'google', 'moonshot', 'deepseek', 'groq', 'mistral', 'xai'];
+const PROVIDER_ORDER = ['anthropic', 'openai', 'google', 'moonshot', 'deepseek', 'groq', 'mistral', 'xai', 'local'];
 
 interface ServiceInfo {
   name: string;
@@ -190,8 +191,18 @@ export function SettingsPage() {
                   </span>
                 </div>
                 <div>
-                  <label className="text-xs text-zinc-400 mb-1 block">API Key</label>
+                  <label className="text-xs text-zinc-400 mb-1 block">{name === 'local' ? 'Server URL' : 'API Key'}</label>
                   <div className="flex gap-2">
+                    {name === 'local' ? (
+                      <input
+                        type="text"
+                        placeholder={isConfigured ? 'Configured' : meta.placeholder}
+                        value={keys[name] ?? ''}
+                        onChange={e => setKeys(k => ({ ...k, [name]: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && handleSave(name)}
+                        className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                      />
+                    ) : (
                     <div className="flex-1 relative">
                       <input
                         type={isVisible ? 'text' : 'password'}
@@ -209,6 +220,7 @@ export function SettingsPage() {
                         {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
                     </div>
+                    )}
                     <button
                       aria-label={`Save ${meta.display} API key`}
                       onClick={() => handleSave(name)}

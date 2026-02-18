@@ -16,6 +16,7 @@ const DEFAULT_ROUTES: ModelRoute[] = [
   { priority: 8, provider: 'xai', model: 'grok-3', fallback: true },
   { priority: 9, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', fallback: true },
   { priority: 10, provider: 'openai', model: 'gpt-4o-mini', fallback: true },
+  { priority: 11, provider: 'local', model: 'llama3.1:8b', fallback: true },
 ];
 
 // ─── Circuit Breaker ────────────────────────────
