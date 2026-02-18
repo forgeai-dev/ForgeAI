@@ -69,11 +69,11 @@ The agentic loop runs up to **25 iterations** per request. The agent browses the
 </td>
 <td width="50%">
 
-### 🔄 8 LLM Providers with Auto-Failover
-Anthropic, OpenAI, Google, Moonshot/Kimi, DeepSeek, xAI/Grok, Groq, and Mistral. Circuit breaker per provider, exponential backoff, automatic fallback chain. If one provider goes down, the next one picks up seamlessly.
+### 🔄 9 LLM Providers with Auto-Failover
+Anthropic, OpenAI, Google, Moonshot/Kimi, DeepSeek, xAI/Grok, Groq, Mistral, and **Local LLMs** (Ollama/LM Studio/llama.cpp). Circuit breaker per provider, exponential backoff, automatic fallback chain. Cloud ↔ local failover — if all cloud providers go down, your local model picks up.
 
 ### 📊 Full Observability
-16-page dashboard with real-time WebSocket updates. See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
+17-page dashboard with real-time WebSocket updates. See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
 
 ### 🧩 Extensible Everything
 Plugin SDK for custom behaviors. MCP Client for external tool servers. Workflow engine for multi-step automation. RAG engine for document search. REST API with 140+ endpoints for full programmatic control.
@@ -121,7 +121,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **Google Chat** | Chat API | Webhook + async REST, service account JWT, space routing |
 | **WebChat** | Built-in | Browser-based, real-time execution steps, session persistence |
 
-### LLM Providers (8) with Automatic Failover
+### LLM Providers (9) with Automatic Failover
 
 | Provider | Models | Balance API |
 |:---------|:-------|:------------|
@@ -133,10 +133,11 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **xAI** | Grok 3, Grok 3 Mini, Grok 2 | — |
 | **Groq** | Llama 3.3 70B, Mixtral 8x7B | — |
 | **Mistral** | Mistral Large, Codestral | — |
+| **Local (Ollama)** | Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek-R1 | — |
 
 Every provider has **circuit breaker** protection (5-failure threshold, 2-minute cooldown), **exponential backoff** retries, and **automatic failover** to the next provider in the chain.
 
-### Built-in Tools (11)
+### Built-in Tools (12)
 
 | Tool | What it does |
 |:-----|:-------------|
@@ -151,6 +152,7 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `sessions_list` | Discover all active agent sessions and their metadata. |
 | `sessions_history` | Fetch full transcript of any session (agent-to-agent communication). |
 | `sessions_send` | Send messages between agents for collaborative multi-agent workflows. |
+| `image_generate` | Generate images via DALL-E 3, Leonardo AI, or Stable Diffusion. Save to disk. |
 
 ### Security Modules (7)
 
@@ -553,21 +555,21 @@ pnpm forge status      # Quick status check
 All core features are implemented and tested:
 
 - **Security** — 7 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, audit
-- **Agent** — Multi-LLM router (8 providers), agentic loop (25 iter), thinking levels, failover + circuit breaker
+- **Agent** — Multi-LLM router (9 providers incl. Ollama local), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
-- **Tools** — 11 built-in + MCP Client + Puppeteer + Shell + Sandbox
-- **Dashboard** — 16 pages, WebSocket real-time, provider balance tracking
+- **Tools** — 12 built-in + MCP Client + Puppeteer + Shell + Sandbox
+- **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
+- **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
+- **Security Hardening** — Startup integrity check (auto-verify hash chain on boot), generic webhook alerts (custom URL for security notifications), audit log rotation (90-day retention)
 
 ### What's Next
 
 | Feature | Priority |
 |:--------|:---------|
 | RBAC hard enforcement (block 403 when dashboard auth is integrated) | High |
-| Integrity check on gateway startup (auto-verify hash chain on boot) | High |
-| Generic webhook alerts (custom URL for security notifications) | High |
 | Electron desktop app | Medium |
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |

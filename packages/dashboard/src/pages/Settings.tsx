@@ -28,6 +28,7 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   leonardo: { placeholder: 'Enter Leonardo AI API key...', desc: 'Leonardo Phoenix model for image generation' },
   elevenlabs: { placeholder: 'Enter ElevenLabs API key...', desc: 'High-quality TTS voices' },
   'stable-diffusion': { placeholder: 'http://127.0.0.1:7860', desc: 'AUTOMATIC1111 WebUI URL (with --api flag)' },
+  'security-webhook': { placeholder: 'https://hooks.slack.com/...', desc: 'POST security alerts to this URL (Slack, Discord, custom)' },
 };
 
 export function SettingsPage() {
@@ -289,6 +290,53 @@ export function SettingsPage() {
             </div>
           ))}
         </div>
+
+        {/* Security Webhook URL */}
+        {(() => {
+          const svc = services.find(s => s.name === 'security-webhook');
+          const meta = SERVICE_META['security-webhook'];
+          const isConfigured = svc?.configured ?? false;
+          const isSaving = svcSaving['security-webhook'] ?? false;
+          const isSaved = svcSaved['security-webhook'] ?? false;
+          return (
+            <div className="rounded-xl border border-zinc-800 p-5 space-y-3 mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-medium text-white">Webhook Alerts</span>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+                  {isConfigured ? 'Active' : 'Not set'}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Webhook URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder={isConfigured ? 'Configured' : meta.placeholder}
+                    value={svcKeys['security-webhook'] ?? ''}
+                    onChange={e => setSvcKeys(k => ({ ...k, 'security-webhook': e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleSvcSave('security-webhook')}
+                    className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                  />
+                  <button aria-label="Save webhook URL" onClick={() => handleSvcSave('security-webhook')} disabled={isSaving || !(svcKeys['security-webhook']?.trim())}
+                    className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${isSaved ? 'bg-emerald-500' : isSaving ? 'bg-forge-500/50 cursor-wait' : svcKeys['security-webhook']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                    {isSaved ? <Check className="w-4 h-4" /> : isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  </button>
+                  {isConfigured && (
+                    <button aria-label="Remove webhook URL" onClick={() => handleSvcRemove('security-webhook')} disabled={svcDeleting['security-webhook']}
+                      className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                      {svcDeleting['security-webhook'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    </button>
+                  )}
+                </div>
+                {svcErrors['security-webhook'] && <p className="text-xs text-red-400 mt-1">{svcErrors['security-webhook']}</p>}
+                <p className="text-[10px] text-zinc-500 mt-1">Receives JSON POST for every security alert (rate limit, injection, integrity failure)</p>
+              </div>
+            </div>
+          );
+        })()}
       </section>
 
       {/* Image Generation */}

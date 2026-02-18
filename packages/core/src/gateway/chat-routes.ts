@@ -131,6 +131,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'STABLE_DIFFUSION_URL',
       'VOICE_ENABLED',
       'OLLAMA_BASE_URL',
+      'SECURITY_WEBHOOK_URL',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -1480,6 +1481,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'elevenlabs', display: 'ElevenLabs', envKey: 'ELEVENLABS_API_KEY', type: 'key' as const },
     { name: 'stable-diffusion', display: 'Stable Diffusion', envKey: 'STABLE_DIFFUSION_URL', type: 'url' as const },
     { name: 'voice-enabled', display: 'Voice Engine', envKey: 'VOICE_ENABLED', type: 'toggle' as const },
+    { name: 'security-webhook', display: 'Security Webhook', envKey: 'SECURITY_WEBHOOK_URL', type: 'url' as const },
   ];
 
   // GET /api/services — list service configs status

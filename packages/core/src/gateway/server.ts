@@ -747,6 +747,33 @@ export class Gateway {
       }
     };
 
+    // Generic webhook alerts — POST to custom URLs stored in Vault
+    const sendWebhookAlerts = async (alert: { id?: string; severity: string; title: string; message: string; timestamp: number | Date }) => {
+      const webhookUrl = this.vault.isInitialized()
+        ? (this.vault.get('env:SECURITY_WEBHOOK_URL') ?? process.env['SECURITY_WEBHOOK_URL'])
+        : process.env['SECURITY_WEBHOOK_URL'];
+      if (!webhookUrl) return;
+
+      try {
+        await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'forgeai',
+            type: 'security.alert',
+            severity: alert.severity,
+            title: alert.title,
+            message: alert.message,
+            timestamp: alert.timestamp,
+            id: alert.id,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (err) {
+        logger.debug('Webhook alert delivery failed', { url: webhookUrl, error: (err as Error).message });
+      }
+    };
+
     this.auditLogger.onAlert(async (alert) => {
       // 1. Broadcast to WebSocket clients (instant — cheap)
       broadcaster.broadcastAll({
@@ -765,16 +792,17 @@ export class Gateway {
 
       const elapsed = Date.now() - lastTgSentAt;
       if (elapsed >= TG_COOLDOWN_MS) {
-        // Cooldown expired — send immediately
         if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
         await flushTelegramAlerts();
       } else if (!batchTimer) {
-        // Schedule flush when cooldown expires
         batchTimer = setTimeout(() => flushTelegramAlerts(), TG_COOLDOWN_MS - elapsed);
       }
+
+      // 3. Send to generic webhook (if configured)
+      sendWebhookAlerts(alert).catch(() => {});
     });
 
-    logger.info('Security alert handlers registered (WebSocket + Telegram, 60s cooldown)');
+    logger.info('Security alert handlers registered (WebSocket + Telegram + Webhook, 60s cooldown)');
   }
 
   async start(): Promise<void> {
@@ -801,6 +829,43 @@ export class Gateway {
 
       // Run rotation once on startup (deferred 30s to not slow boot)
       setTimeout(() => this.auditLogger.rotate(90).catch(() => {}), 30_000);
+
+      // ─── Integrity check on startup (deferred 10s) ──────────
+      setTimeout(async () => {
+        try {
+          const result = await this.auditLogger.verifyIntegrity(500);
+          if (result.valid) {
+            logger.info(`✅ Audit integrity OK — ${result.totalChecked} entries verified, hash chain intact`);
+          } else {
+            logger.error(`🚨 AUDIT INTEGRITY FAILURE — broken at entry ${result.brokenAtId ?? '?'} (index ${result.brokenAtIndex ?? '?'}) in ${result.totalChecked} entries!`);
+            this.auditLogger.log({
+              action: 'security.integrity_check',
+              details: {
+                valid: false,
+                brokenAtId: result.brokenAtId,
+                brokenAtIndex: result.brokenAtIndex,
+                totalChecked: result.totalChecked,
+                trigger: 'startup_check',
+              },
+              riskLevel: 'critical',
+              success: false,
+            });
+            // Broadcast alert via WebSocket
+            const wsBroadcaster = getWSBroadcaster();
+            wsBroadcaster.broadcastAll({
+              type: 'security.alert',
+              payload: {
+                severity: 'critical',
+                title: 'Audit Integrity Failure',
+                message: `Hash chain broken at entry ${result.brokenAtId ?? '?'} (${result.totalChecked} checked)`,
+                timestamp: Date.now(),
+              },
+            });
+          }
+        } catch (err) {
+          logger.warn('Startup integrity check failed', err as Record<string, unknown>);
+        }
+      }, 10_000);
     } catch (error) {
       logger.fatal('Failed to start Gateway', error);
       throw error;
