@@ -293,6 +293,8 @@ export function RAGPage() {
               <input
                 ref={fileInputRef}
                 type="file"
+                title="Choose a file to upload"
+                aria-label="Choose a file to upload"
                 onChange={handleFileUpload}
                 accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.html,.htm,.pdf,.js,.ts,.py,.java,.c,.cpp,.css,.sql,.sh,.log,.ini,.toml,.cfg"
                 className="flex-1 text-sm text-zinc-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500 file:cursor-pointer"
@@ -361,9 +363,11 @@ export function RAGPage() {
           <div className="grid grid-cols-2 gap-4">
             {/* Embedding Provider */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Provider</label>
+              <label htmlFor="rag-embedding-provider" className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Provider</label>
               {editConfig ? (
                 <select
+                  id="rag-embedding-provider"
+                  title="Embedding Provider"
                   value={configDraft.embeddingProvider ?? config.embeddingProvider}
                   onChange={e => setConfigDraft(p => ({ ...p, embeddingProvider: e.target.value as 'tfidf' | 'openai' }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -378,10 +382,12 @@ export function RAGPage() {
 
             {/* Embedding Model */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Model</label>
+              <label htmlFor="rag-embedding-model" className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Model</label>
               {editConfig ? (
                 <input
+                  id="rag-embedding-model"
                   type="text"
+                  title="Embedding Model"
                   value={configDraft.embeddingModel ?? config.embeddingModel}
                   onChange={e => setConfigDraft(p => ({ ...p, embeddingModel: e.target.value }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -393,10 +399,12 @@ export function RAGPage() {
 
             {/* Chunk Size */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Size (words)</label>
+              <label htmlFor="rag-chunk-size" className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Size (words)</label>
               {editConfig ? (
                 <input
+                  id="rag-chunk-size"
                   type="number"
+                  title="Chunk Size"
                   value={configDraft.chunkSize ?? config.chunkSize}
                   onChange={e => setConfigDraft(p => ({ ...p, chunkSize: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -408,10 +416,12 @@ export function RAGPage() {
 
             {/* Chunk Overlap */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Overlap (words)</label>
+              <label htmlFor="rag-chunk-overlap" className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Overlap (words)</label>
               {editConfig ? (
                 <input
+                  id="rag-chunk-overlap"
                   type="number"
+                  title="Chunk Overlap"
                   value={configDraft.chunkOverlap ?? config.chunkOverlap}
                   onChange={e => setConfigDraft(p => ({ ...p, chunkOverlap: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -423,10 +433,12 @@ export function RAGPage() {
 
             {/* Max Results */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Max Results</label>
+              <label htmlFor="rag-max-results" className="text-xs text-zinc-500 uppercase tracking-wide">Max Results</label>
               {editConfig ? (
                 <input
+                  id="rag-max-results"
                   type="number"
+                  title="Max Results"
                   value={configDraft.maxResults ?? config.maxResults}
                   onChange={e => setConfigDraft(p => ({ ...p, maxResults: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -438,10 +450,12 @@ export function RAGPage() {
 
             {/* Similarity Threshold */}
             <div>
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Similarity Threshold</label>
+              <label htmlFor="rag-similarity-threshold" className="text-xs text-zinc-500 uppercase tracking-wide">Similarity Threshold</label>
               {editConfig ? (
                 <input
+                  id="rag-similarity-threshold"
                   type="number"
+                  title="Similarity Threshold"
                   step="0.01"
                   min="0"
                   max="1"
