@@ -125,15 +125,17 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 
 | Provider | Models | Balance API |
 |:---------|:-------|:------------|
-| **Anthropic** | Claude Sonnet 4, Opus, Haiku | — |
-| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3-mini | — |
+| **OpenAI** | GPT-5.2, GPT-5, GPT-4.1, o3-pro, o4-mini | — |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | — |
 | **Google** | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash | — |
-| **Moonshot** | Kimi K2.5, K2-0711, moonshot-v1-auto | ✅ Real-time |
+| **Moonshot** | Kimi K2.5, moonshot-v1-auto/128k | ✅ Real-time |
 | **DeepSeek** | DeepSeek Chat, Coder, Reasoner | ✅ Real-time |
-| **xAI** | Grok 3, Grok 3 Mini, Grok 2 | — |
-| **Groq** | Llama 3.3 70B, Mixtral 8x7B | — |
-| **Mistral** | Mistral Large, Codestral | — |
+| **xAI** | Grok 4, Grok 3, Grok 2 | — |
+| **Groq** | Llama 3.3 70B, Mixtral 8x7B, Gemma2 | — |
+| **Mistral** | Mistral Large, Small, Codestral, Pixtral | — |
 | **Local (Ollama)** | Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek-R1 | — |
+
+All model lists are **configurable per provider** via the dashboard Settings page or the `POST /api/providers/:name/models` API endpoint. Custom models are stored encrypted in Vault.
 
 Every provider has **circuit breaker** protection (5-failure threshold, 2-minute cooldown), **exponential backoff** retries, and **automatic failover** to the next provider in the chain.
 

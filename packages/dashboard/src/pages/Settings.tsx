@@ -3,14 +3,14 @@ import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, 
 import { api, type ProviderInfo } from '@/lib/api';
 
 const PROVIDER_META: Record<string, { display: string; placeholder: string; models: string }> = {
-  anthropic: { display: 'Anthropic (Claude)', placeholder: 'sk-ant-api03-...', models: 'Claude Sonnet 4, Haiku 3.5' },
-  openai: { display: 'OpenAI (GPT)', placeholder: 'sk-...', models: 'GPT-4o, o1, o3-mini' },
-  google: { display: 'Google Gemini', placeholder: 'AIza...', models: 'Gemini 2.5 Pro/Flash, 2.0, 1.5' },
-  moonshot: { display: 'Kimi (Moonshot)', placeholder: 'sk-...', models: 'Kimi K2.5, K2, moonshot-v1-128k' },
+  openai: { display: 'OpenAI (GPT)', placeholder: 'sk-...', models: 'GPT-5.2, GPT-5, GPT-4.1, o3-pro, o4-mini' },
+  anthropic: { display: 'Anthropic (Claude)', placeholder: 'sk-ant-api03-...', models: 'Opus 4.6, Sonnet 4.6, Haiku 4.5' },
+  google: { display: 'Google Gemini', placeholder: 'AIza...', models: 'Gemini 2.5 Pro/Flash, 2.0 Flash' },
+  moonshot: { display: 'Kimi (Moonshot)', placeholder: 'sk-...', models: 'Kimi K2.5, moonshot-v1-auto/128k' },
   deepseek: { display: 'DeepSeek', placeholder: 'sk-...', models: 'DeepSeek Chat, Coder, Reasoner' },
-  groq: { display: 'Groq', placeholder: 'gsk_...', models: 'Llama 3.3 70B, Mixtral 8x7B' },
-  mistral: { display: 'Mistral AI', placeholder: 'sk-...', models: 'Mistral Large, Codestral, Pixtral' },
-  xai: { display: 'xAI (Grok)', placeholder: 'xai-...', models: 'Grok-3, Grok-2' },
+  groq: { display: 'Groq', placeholder: 'gsk_...', models: 'Llama 3.3 70B, Mixtral 8x7B, Gemma2' },
+  mistral: { display: 'Mistral AI', placeholder: 'sk-...', models: 'Mistral Large, Small, Codestral, Pixtral' },
+  xai: { display: 'xAI (Grok)', placeholder: 'xai-...', models: 'Grok-4, Grok-3, Grok-2' },
   local: { display: 'Local LLM (Ollama)', placeholder: 'http://localhost:11434', models: 'Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek' },
 };
 
@@ -39,6 +39,13 @@ export function SettingsPage() {
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [deleting, setDeleting] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Model editor state per provider
+  const [editingModels, setEditingModels] = useState<string | null>(null);
+  const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
+  const [modelInput, setModelInput] = useState('');
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelCustom, setModelCustom] = useState<Record<string, boolean>>({});
 
   // Service keys state (Leonardo, ElevenLabs, SD URL, Voice)
   const [services, setServices] = useState<ServiceInfo[]>([]);
@@ -96,6 +103,63 @@ export function SettingsPage() {
       loadServices();
     } catch { /* ignore */ }
     setSvcDeleting(s => ({ ...s, [name]: false }));
+  };
+
+  const loadModels = async (name: string) => {
+    try {
+      const res = await fetch(`/api/providers/${name}/models`);
+      const data = await res.json() as { models: string[]; custom: boolean };
+      setProviderModels(m => ({ ...m, [name]: data.models ?? [] }));
+      setModelCustom(c => ({ ...c, [name]: data.custom ?? false }));
+    } catch { /* ignore */ }
+  };
+
+  const handleOpenModelEditor = async (name: string) => {
+    await loadModels(name);
+    setModelInput('');
+    setEditingModels(name);
+  };
+
+  const handleAddModel = (name: string) => {
+    const val = modelInput.trim();
+    if (!val) return;
+    const current = providerModels[name] ?? [];
+    if (current.includes(val)) { setModelInput(''); return; }
+    setProviderModels(m => ({ ...m, [name]: [...current, val] }));
+    setModelInput('');
+  };
+
+  const handleRemoveModel = (name: string, model: string) => {
+    const current = providerModels[name] ?? [];
+    setProviderModels(m => ({ ...m, [name]: current.filter(m2 => m2 !== model) }));
+  };
+
+  const handleSaveModels = async (name: string) => {
+    const models = providerModels[name];
+    if (!models || models.length === 0) return;
+    setModelSaving(true);
+    try {
+      await fetch(`/api/providers/${name}/models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ models }),
+      });
+      setModelCustom(c => ({ ...c, [name]: true }));
+      loadProviders();
+    } catch { /* ignore */ }
+    setModelSaving(false);
+  };
+
+  const handleResetModels = async (name: string) => {
+    setModelSaving(true);
+    try {
+      const res = await fetch(`/api/providers/${name}/models`, { method: 'DELETE' });
+      const data = await res.json() as { models: string[] };
+      setProviderModels(m => ({ ...m, [name]: data.models ?? [] }));
+      setModelCustom(c => ({ ...c, [name]: false }));
+      loadProviders();
+    } catch { /* ignore */ }
+    setModelSaving(false);
   };
 
   const handleVoiceToggle = async () => {
@@ -253,6 +317,48 @@ export function SettingsPage() {
                     <p className="text-[11px] text-red-400 mt-1.5 font-medium">{errors[name]}</p>
                   )}
                   <p className="text-[10px] text-zinc-500 mt-1">Stored encrypted in Vault (AES-256-GCM)</p>
+                </div>
+
+                {/* Models — toggle editor */}
+                <div className="pt-2 border-t border-zinc-800/50">
+                  <button onClick={() => editingModels === name ? setEditingModels(null) : handleOpenModelEditor(name)}
+                    className="text-[11px] text-forge-400 hover:text-forge-300 transition-colors">
+                    {editingModels === name ? '▾ Hide models' : '▸ Configure models'}{modelCustom[name] ? ' (custom)' : ''}
+                  </button>
+
+                  {editingModels === name && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {(providerModels[name] ?? []).map(model => (
+                          <span key={model} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800 text-[11px] text-zinc-300 border border-zinc-700">
+                            {model}
+                            <button onClick={() => handleRemoveModel(name, model)} className="text-zinc-500 hover:text-red-400 ml-0.5">&times;</button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text" placeholder="Add model ID (e.g. gpt-5.2)"
+                          value={modelInput} onChange={e => setModelInput(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddModel(name); } }}
+                          className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-md px-2 py-1 text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
+                        />
+                        <button onClick={() => handleAddModel(name)} className="px-2 py-1 rounded-md bg-zinc-700 hover:bg-zinc-600 text-[11px] text-zinc-300">Add</button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => handleSaveModels(name)} disabled={modelSaving}
+                          className="px-2 py-1 rounded-md bg-forge-500 hover:bg-forge-600 text-[11px] text-white font-medium disabled:opacity-50">
+                          {modelSaving ? 'Saving...' : 'Save models'}
+                        </button>
+                        {modelCustom[name] && (
+                          <button onClick={() => handleResetModels(name)} disabled={modelSaving}
+                            className="px-2 py-1 rounded-md border border-zinc-700 hover:border-zinc-500 text-[11px] text-zinc-400 disabled:opacity-50">
+                            Reset to defaults
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

@@ -124,6 +124,10 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
     return [...this.models];
   }
 
+  setModels(models: string[]): void {
+    if (models.length > 0) this.models = [...models];
+  }
+
   async chat(request: LLMRequest): Promise<LLMResponse> {
     if (!this.isConfigured()) {
       throw new LLMProviderError(this.name, 'API key not configured');

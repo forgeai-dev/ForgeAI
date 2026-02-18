@@ -145,6 +145,26 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         }
       }
     }
+
+    // Load custom model lists from Vault and apply to registered providers
+    for (const providerName of ['openai', 'anthropic', 'google', 'moonshot', 'deepseek', 'groq', 'mistral', 'xai', 'local']) {
+      const modelsKey = `models:${providerName}`;
+      if (vaultKeys.includes(modelsKey)) {
+        try {
+          const raw = vault.get(modelsKey);
+          if (raw) {
+            const models = JSON.parse(raw) as string[];
+            const registered = router.getProviders().get(providerName as any);
+            if (registered && 'setModels' in registered && typeof (registered as any).setModels === 'function') {
+              (registered as any).setModels(models);
+              logger.info(`Loaded custom models for ${providerName} from Vault`, { count: models.length });
+            }
+          }
+        } catch {
+          logger.warn(`Failed to load custom models for ${providerName} from Vault`);
+        }
+      }
+    }
   }
 
   // ─── Channel Permissions via Vault ────────────────────────
@@ -1331,14 +1351,14 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
   // GET /api/providers — list ALL LLM providers (configured or not)
   const ALL_PROVIDERS_META: Array<{ name: string; displayName: string; models: string[]; envKey: string }> = [
-    { name: 'anthropic', displayName: 'Anthropic (Claude)', models: ['claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'], envKey: 'ANTHROPIC_API_KEY' },
-    { name: 'openai', displayName: 'OpenAI (GPT)', models: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini'], envKey: 'OPENAI_API_KEY' },
-    { name: 'google', displayName: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'], envKey: 'GOOGLE_API_KEY' },
-    { name: 'moonshot', displayName: 'Kimi (Moonshot)', models: ['kimi-k2-0711', 'moonshot-v1-auto', 'moonshot-v1-128k'], envKey: 'MOONSHOT_API_KEY' },
+    { name: 'openai', displayName: 'OpenAI (GPT)', models: ['gpt-5.2', 'gpt-5.2-pro', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini', 'o3-pro', 'o4-mini'], envKey: 'OPENAI_API_KEY' },
+    { name: 'anthropic', displayName: 'Anthropic (Claude)', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'], envKey: 'ANTHROPIC_API_KEY' },
+    { name: 'google', displayName: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'], envKey: 'GOOGLE_API_KEY' },
+    { name: 'moonshot', displayName: 'Kimi (Moonshot)', models: ['kimi-k2.5', 'kimi-k2-0711-preview', 'moonshot-v1-auto', 'moonshot-v1-128k'], envKey: 'MOONSHOT_API_KEY' },
     { name: 'deepseek', displayName: 'DeepSeek', models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'], envKey: 'DEEPSEEK_API_KEY' },
-    { name: 'groq', displayName: 'Groq', models: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'], envKey: 'GROQ_API_KEY' },
-    { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'codestral-latest'], envKey: 'MISTRAL_API_KEY' },
-    { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-3', 'grok-2'], envKey: 'XAI_API_KEY' },
+    { name: 'groq', displayName: 'Groq', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'], envKey: 'GROQ_API_KEY' },
+    { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'pixtral-large-latest'], envKey: 'MISTRAL_API_KEY' },
+    { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-4', 'grok-3', 'grok-3-mini', 'grok-2'], envKey: 'XAI_API_KEY' },
     { name: 'local', displayName: 'Local LLM (Ollama)', models: ['llama3.1:8b', 'mistral:7b', 'codellama:13b', 'phi3:mini', 'qwen2.5:7b', 'deepseek-r1:8b'], envKey: 'OLLAMA_BASE_URL' },
   ];
 
@@ -1472,6 +1492,77 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     syncAgentToRouter();
     logger.info(`Provider ${name} key removed`, { name });
     return { success: true, provider: name, removed: true };
+  });
+
+  // ─── Custom Models per Provider ───
+  // GET /api/providers/:name/models — list models (custom or default)
+  app.get('/api/providers/:name/models', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const meta = ALL_PROVIDERS_META.find(p => p.name === name);
+    if (!meta) return { error: `Unknown provider: ${name}` };
+
+    // Check Vault for custom models
+    const vaultKey = `models:${name}`;
+    let customModels: string[] | null = null;
+    if (vault?.isInitialized()) {
+      try {
+        const stored = vault.get(vaultKey);
+        if (stored) customModels = JSON.parse(stored) as string[];
+      } catch { /* ignore */ }
+    }
+
+    const registered = router.getProviders().get(name as any);
+    const models = customModels ?? registered?.listModels() ?? meta.models;
+    return { provider: name, models, custom: !!customModels };
+  });
+
+  // POST /api/providers/:name/models — save custom model list
+  app.post('/api/providers/:name/models', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const { models } = request.body as { models: string[] };
+    const meta = ALL_PROVIDERS_META.find(p => p.name === name);
+    if (!meta) return { error: `Unknown provider: ${name}` };
+
+    if (!models || !Array.isArray(models) || models.length === 0) {
+      return { error: 'models must be a non-empty array of strings' };
+    }
+
+    const cleaned = models.map(m => m.trim()).filter(m => m.length > 0);
+    if (cleaned.length === 0) return { error: 'No valid model names provided' };
+
+    // Save to Vault
+    if (vault?.isInitialized()) {
+      vault.set(`models:${name}`, JSON.stringify(cleaned));
+    }
+
+    // Apply to running provider
+    const registered = router.getProviders().get(name as any);
+    if (registered && 'setModels' in registered && typeof (registered as any).setModels === 'function') {
+      (registered as any).setModels(cleaned);
+    }
+
+    logger.info(`Custom models for ${name} saved`, { name, count: cleaned.length });
+    return { success: true, provider: name, models: cleaned };
+  });
+
+  // DELETE /api/providers/:name/models — reset to default models
+  app.delete('/api/providers/:name/models', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const meta = ALL_PROVIDERS_META.find(p => p.name === name);
+    if (!meta) return { error: `Unknown provider: ${name}` };
+
+    if (vault?.isInitialized()) {
+      vault.delete(`models:${name}`);
+    }
+
+    // Reset provider to defaults by re-registering
+    const registered = router.getProviders().get(name as any);
+    if (registered && 'setModels' in registered && typeof (registered as any).setModels === 'function') {
+      (registered as any).setModels(meta.models);
+    }
+
+    logger.info(`Custom models for ${name} reset to defaults`, { name });
+    return { success: true, provider: name, models: meta.models, reset: true };
   });
 
   // ─── Service Keys (Leonardo, ElevenLabs, SD URL, Voice) ───

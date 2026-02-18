@@ -6,10 +6,13 @@ import { LLMProviderError } from './base.js';
 const logger = createLogger('Agent:Anthropic');
 
 const ANTHROPIC_MODELS = [
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-opus-4-5',
+  'claude-sonnet-4-5-20250929',
+  'claude-haiku-4-5-20251001',
   'claude-sonnet-4-20250514',
   'claude-opus-4-20250514',
-  'claude-3-5-haiku-20241022',
-  'claude-3-5-sonnet-20241022',
 ];
 
 interface AnthropicMessage {
@@ -44,6 +47,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
 
   private apiKey: string;
   private baseUrl: string;
+  private customModels: string[] | null = null;
 
   constructor(apiKey?: string, baseUrl?: string) {
     this.apiKey = apiKey || process.env['ANTHROPIC_API_KEY'] || '';
@@ -55,7 +59,11 @@ export class AnthropicProvider implements LLMProviderAdapter {
   }
 
   listModels(): string[] {
-    return [...ANTHROPIC_MODELS];
+    return this.customModels ? [...this.customModels] : [...ANTHROPIC_MODELS];
+  }
+
+  setModels(models: string[]): void {
+    if (models.length > 0) this.customModels = [...models];
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {
