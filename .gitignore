@@ -17,3 +17,6 @@ forgeai-vault.enc
 
 # Runtime data (vault with API keys, sessions, workspace prompts, WhatsApp auth)
 .forgeai/
+
+# Landing page website (deployed separately, not part of the codebase)
+website/
