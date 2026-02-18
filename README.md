@@ -25,6 +25,10 @@
 
 <br />
 
+<p align="center">
+  <img src="docs/screenshots/overview.png" alt="ForgeAI Dashboard Overview" width="900" />
+</p>
+
 ---
 
 ## What is ForgeAI?
@@ -172,6 +176,40 @@ Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ─�
 ## 📊 Dashboard (16 Pages)
 
 The dashboard is a full-featured React 19 SPA served directly by the Gateway. No separate deployment needed.
+
+<details>
+<summary><b>📸 Dashboard Screenshots (click to expand)</b></summary>
+<br />
+
+| Chat | Tools |
+|:----:|:-----:|
+| ![Chat](docs/screenshots/chat.png) | ![Tools](docs/screenshots/tools.png) |
+
+| Usage & Balances | Channels |
+|:----:|:-----:|
+| ![Usage](docs/screenshots/usage.png) | ![Channels](docs/screenshots/channels.png) |
+
+| Agents | Settings |
+|:----:|:-----:|
+| ![Agents](docs/screenshots/agents.png) | ![Settings](docs/screenshots/settings.png) |
+
+| Audit Log | Workspace |
+|:----:|:-----:|
+| ![Audit](docs/screenshots/audit.png) | ![Workspace](docs/screenshots/workspace.png) |
+
+| Plugins | Memory |
+|:----:|:-----:|
+| ![Plugins](docs/screenshots/plugins.png) | ![Memory](docs/screenshots/memory.png) |
+
+| API Keys | Webhooks |
+|:----:|:-----:|
+| ![API Keys](docs/screenshots/api-keys.png) | ![Webhooks](docs/screenshots/webhooks.png) |
+
+| Gmail | Calendar |
+|:----:|:-----:|
+| ![Gmail](docs/screenshots/gmail.png) | ![Calendar](docs/screenshots/calendar.png) |
+
+</details>
 
 | Page | Capabilities |
 |:-----|:------------|
