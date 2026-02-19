@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash } from 'lucide-react';
-import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo } from '@/lib/api';
+import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -399,6 +399,10 @@ export function ChatPage() {
   const [pendingImage, setPendingImage] = useState<{ file: File; preview: string; base64: string } | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   const refreshSessions = useCallback(() => {
     api.getSessions().then(data => setSessions(data.sessions)).catch(() => {});
@@ -414,8 +418,15 @@ export function ChatPage() {
     }).catch(() => {});
   }, [activeAgentId]);
 
-  // Load sessions and agents on mount
-  useEffect(() => { refreshSessions(); refreshAgents(); }, [refreshSessions, refreshAgents]);
+  const refreshProviders = useCallback(() => {
+    api.getProviders().then(r => {
+      const configured = r.providers.filter(p => p.configured);
+      setProviders(configured);
+    }).catch(() => {});
+  }, []);
+
+  // Load sessions, agents and providers on mount
+  useEffect(() => { refreshSessions(); refreshAgents(); refreshProviders(); }, [refreshSessions, refreshAgents, refreshProviders]);
 
   // ─── Session persistence: save to localStorage ───
   useEffect(() => {
@@ -840,7 +851,7 @@ export function ChatPage() {
       setPendingImage(null);
 
       // Start sending and polling in parallel
-      const sendPromise = api.sendMessage(contentText, activeSid ?? undefined, imagePayload, activeAgentId ?? undefined);
+      const sendPromise = api.sendMessage(contentText, activeSid ?? undefined, imagePayload, activeAgentId ?? undefined, selectedModel ?? undefined, selectedProvider ?? undefined);
 
       // Start polling after a short delay (give backend time to create session)
       setTimeout(() => {
@@ -1211,6 +1222,63 @@ export function ChatPage() {
               >
                 + Gerenciar
               </a>
+            </div>
+          )}
+          {/* Model/Provider picker */}
+          {providers.length > 0 && (
+            <div className="flex items-center gap-1.5 mb-2 px-1 relative">
+              <span className="text-[10px] text-zinc-500 mr-1">Model:</span>
+              <button
+                onClick={() => setShowModelPicker(!showModelPicker)}
+                className={cn(
+                  'px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1',
+                  selectedModel
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                    : 'bg-zinc-800/50 text-zinc-500 border border-zinc-700/50 hover:text-zinc-300 hover:border-zinc-600'
+                )}
+              >
+                {selectedModel ? `${selectedModel}` : 'Default (auto)'}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              {selectedModel && (
+                <button
+                  onClick={() => { setSelectedModel(null); setSelectedProvider(null); }}
+                  className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                  title="Reset to default"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+              {showModelPicker && (
+                <div className="absolute bottom-full left-0 mb-1 w-80 max-h-64 overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50">
+                  <div className="p-2 border-b border-zinc-800">
+                    <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Select Provider / Model</p>
+                  </div>
+                  {providers.map(p => (
+                    <div key={p.name} className="border-b border-zinc-800/50 last:border-0">
+                      <p className="px-3 pt-2 pb-1 text-[10px] text-zinc-500 font-semibold uppercase">{p.displayName}</p>
+                      {p.models.map(m => (
+                        <button
+                          key={`${p.name}-${m}`}
+                          onClick={() => {
+                            setSelectedProvider(p.name);
+                            setSelectedModel(m);
+                            setShowModelPicker(false);
+                          }}
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-xs transition-colors',
+                            selectedModel === m && selectedProvider === p.name
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'text-zinc-300 hover:bg-zinc-800'
+                          )}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {loading && (

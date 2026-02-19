@@ -153,10 +153,10 @@ export const api = {
   getHealth: () => request<HealthData>('/health'),
   getInfo: () => request<InfoData>('/info'),
   getProviders: () => request<{ providers: ProviderInfo[]; routes: unknown[] }>('/api/providers'),
-  sendMessage: (message: string, sessionId?: string, image?: { data: string; mimeType: string; filename: string }, agentId?: string) =>
+  sendMessage: (message: string, sessionId?: string, image?: { data: string; mimeType: string; filename: string }, agentId?: string, model?: string, provider?: string) =>
     request<ChatResponse>('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, sessionId, image, agentId }),
+      body: JSON.stringify({ message, sessionId, image, agentId, model, provider }),
     }),
   getHistory: (sessionId: string) =>
     request<{ sessionId: string; messages: StoredMessage[] }>(

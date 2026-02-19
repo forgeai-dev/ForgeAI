@@ -948,6 +948,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       sessionId?: string;
       userId?: string;
       agentId?: string;
+      model?: string;
+      provider?: string;
       image?: { data: string; mimeType: string; filename?: string };
     };
 
@@ -1021,6 +1023,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         channelType: 'webchat',
         agentId: body.agentId,
         image: body.image ? { base64: body.image.data, mimeType: body.image.mimeType } : undefined,
+        modelOverride: body.model,
+        providerOverride: body.provider,
       });
 
       // Clean up progress listener
@@ -1392,15 +1396,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
   app.get('/api/providers', async () => {
     const registeredProviders = router.getProviders();
-    const providerList = ALL_PROVIDERS_META.map(meta => {
+    const providerList = await Promise.all(ALL_PROVIDERS_META.map(async meta => {
       const registered = registeredProviders.get(meta.name as any);
+      let models = meta.models;
+      if (registered) {
+        // For providers with async fetchModels (e.g. Ollama), fetch real installed models
+        if (typeof (registered as any).fetchModels === 'function') {
+          try {
+            models = await (registered as any).fetchModels();
+          } catch {
+            models = registered.listModels();
+          }
+        } else {
+          models = registered.listModels();
+        }
+      }
       return {
         name: meta.name,
         displayName: registered?.displayName ?? meta.displayName,
         configured: registered?.isConfigured() ?? false,
-        models: registered?.listModels() ?? meta.models,
+        models,
       };
-    });
+    }));
 
     return { providers: providerList, routes: router.getRoutes() };
   });

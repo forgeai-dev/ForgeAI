@@ -227,6 +227,8 @@ export class AgentManager {
     channelType?: string;
     agentId?: string;
     image?: { base64: string; mimeType: string };
+    modelOverride?: string;
+    providerOverride?: string;
   }): Promise<AgentResult & { agentId: string }> {
     // If agentId specified, use it directly; otherwise route
     let agent: AgentRuntime | undefined;
@@ -254,6 +256,8 @@ export class AgentManager {
       content: params.content,
       channelType: params.channelType,
       image: params.image,
+      modelOverride: params.modelOverride,
+      providerOverride: params.providerOverride,
     });
 
     return { ...result, agentId: resolvedAgentId };

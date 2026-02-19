@@ -445,9 +445,15 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
     content: string;
     channelType?: string;
     image?: { base64: string; mimeType: string };
+    modelOverride?: string;
+    providerOverride?: string;
   }): Promise<AgentResult> {
     const startTime = Date.now();
     const messageId = generateId('msg');
+
+    // Use overrides if provided, otherwise use agent config
+    const activeModel = params.modelOverride ?? this.config.model;
+    const activeProvider = (params.providerOverride ?? this.config.provider) as import('@forgeai/shared').LLMProvider;
 
     // Step 1: Prompt injection check
     const guardResult = this.promptGuard.analyze(params.content);
@@ -475,8 +481,8 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       return {
         id: messageId,
         content: 'I detected a potentially unsafe prompt and cannot process this message. If this was unintentional, please rephrase your request.',
-        model: this.config.model,
-        provider: this.config.provider,
+        model: activeModel,
+        provider: activeProvider,
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         blocked: true,
         blockReason: `Prompt injection detected (score: ${guardResult.score.toFixed(2)})`,
@@ -550,8 +556,8 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
         this.updateProgress(params.sessionId, { status: 'thinking', iteration: iterations });
 
         response = await this.router.chat({
-          model: this.config.model,
-          provider: this.config.provider,
+          model: activeModel,
+          provider: activeProvider,
           messages: [...messages, ...toolMessages],
           tools,
           temperature: this.config.temperature,
@@ -852,8 +858,8 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       return {
         id: messageId,
         content: userError,
-        model: this.config.model,
-        provider: this.config.provider,
+        model: activeModel,
+        provider: activeProvider,
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         blocked: false,
         duration,
