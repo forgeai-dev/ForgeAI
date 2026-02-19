@@ -62,17 +62,19 @@ export function registerStartCommand(program: Command): void {
         await gateway.initialize();
         await gateway.start();
 
-        console.log(`\n✅ ${APP_NAME} Gateway is running!`);
-        console.log(`   HTTP: http://${options.host}:${options.port}`);
-        console.log(`   WS:   ws://${options.host}:${options.port}/ws`);
-        console.log(`\n🛡️  Security modules active:`);
-        console.log(`   • RBAC Engine        ✓`);
-        console.log(`   • Credential Vault   ✓`);
-        console.log(`   • Rate Limiter       ✓`);
-        console.log(`   • Prompt Guard       ✓`);
-        console.log(`   • Input Sanitizer    ✓`);
-        console.log(`   • Audit Logger       ✓`);
-        console.log(`   • 2FA Support        ✓`);
+        const g = '\x1b[90m';
+        const w = '\x1b[97m';
+        const o = '\x1b[38;5;208m';
+        const gr = '\x1b[32m';
+        const r = '\x1b[0m';
+
+        console.log(`${gr}  Gateway is running!${r}`);
+        console.log(`${g}  ──────────────────────────────────────────────${r}`);
+        console.log(`${w}  HTTP${g}  ${o}http://${options.host}:${options.port}${r}`);
+        console.log(`${w}  WS${g}    ${o}ws://${options.host}:${options.port}/ws${r}`);
+        console.log(`${g}  ──────────────────────────────────────────────${r}`);
+        console.log(`${w}  Security${g}  RBAC ${gr}✓${g} | Vault ${gr}✓${g} | RateLimit ${gr}✓${g} | PromptGuard ${gr}✓${r}`);
+        console.log(`${g}            AuditLog ${gr}✓${g} | InputSanitizer ${gr}✓${g} | 2FA ${gr}✓${r}`);
         console.log('');
 
         // Graceful shutdown

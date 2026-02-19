@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2022-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![CI](https://github.com/diegofelipeee/ForgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/diegofelipeee/ForgeAI/actions)
+[![CI](https://github.com/forgeai-dev/ForgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/forgeai-dev/ForgeAI/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
 <br />
@@ -88,7 +88,7 @@ Plugin SDK for custom behaviors. MCP Client for external tool servers. Workflow 
 
 ```bash
 # Clone
-git clone https://github.com/diegofelipeee/ForgeAI.git
+git clone https://github.com/forgeai-dev/ForgeAI.git
 cd ForgeAI
 
 # Install
@@ -448,7 +448,7 @@ sudo systemctl start mysql && sudo systemctl enable mysql
 sudo mysql -e "CREATE DATABASE forgeai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # Clone, install, configure, start
-git clone https://github.com/diegofelipeee/ForgeAI.git && cd ForgeAI
+git clone https://github.com/forgeai-dev/ForgeAI.git && cd ForgeAI
 pnpm install && pnpm -r build
 pnpm forge onboard    # Interactive wizard
 pnpm forge start      # http://127.0.0.1:18800
@@ -462,7 +462,7 @@ brew services start mysql
 mysql -u root -e "CREATE DATABASE forgeai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 corepack enable && corepack prepare pnpm@latest --activate
 
-git clone https://github.com/diegofelipeee/ForgeAI.git && cd ForgeAI
+git clone https://github.com/forgeai-dev/ForgeAI.git && cd ForgeAI
 pnpm install && pnpm -r build
 pnpm forge onboard && pnpm forge start
 ```
@@ -475,7 +475,7 @@ pnpm forge onboard && pnpm forge start
 corepack enable
 corepack prepare pnpm@latest --activate
 
-git clone https://github.com/diegofelipeee/ForgeAI.git
+git clone https://github.com/forgeai-dev/ForgeAI.git
 cd ForgeAI
 pnpm install
 pnpm -r build
@@ -486,7 +486,7 @@ pnpm forge start
 ### Docker
 
 ```bash
-git clone https://github.com/diegofelipeee/ForgeAI.git && cd ForgeAI
+git clone https://github.com/forgeai-dev/ForgeAI.git && cd ForgeAI
 cp .env.example .env   # Edit with your settings
 docker compose up -d    # Gateway + MySQL, ready at http://localhost:18800
 ```
@@ -591,7 +591,7 @@ See **[ROADMAP.md](./ROADMAP.md)** for the full development history.
 We welcome contributions! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for guidelines.
 
 ```bash
-git clone https://github.com/diegofelipeee/ForgeAI.git
+git clone https://github.com/forgeai-dev/ForgeAI.git
 cd ForgeAI
 pnpm install && pnpm -r build
 pnpm test    # 38 E2E tests

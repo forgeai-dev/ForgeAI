@@ -172,7 +172,130 @@ function formatToolArgs(tool?: string, args?: Record<string, unknown>): string {
     const path = args['path'] || '';
     return `${action} ${path}`;
   }
+  if (tool === 'web_browse' || tool === 'browser') {
+    return String(args['url'] || args['query'] || '').substring(0, 200);
+  }
   return filtered.map(([k, v]) => `${k}: ${String(v).substring(0, 60)}`).join(', ');
+}
+
+function extractResultTitle(result?: string): string | null {
+  if (!result) return null;
+  const titleMatch = result.match(/^title[=:]\s*(.+)/im);
+  if (titleMatch) return titleMatch[1].substring(0, 120);
+  const firstLine = result.split('\n')[0]?.trim();
+  if (firstLine && firstLine.length > 5 && firstLine.length < 150) return firstLine;
+  return null;
+}
+
+function groupSteps(steps: AgentStep[]): Array<{ call?: AgentStep; result?: AgentStep; thinking?: AgentStep; status?: AgentStep }> {
+  const groups: Array<{ call?: AgentStep; result?: AgentStep; thinking?: AgentStep; status?: AgentStep }> = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (step.type === 'tool_call') {
+      const next = steps[i + 1];
+      if (next && next.type === 'tool_result') {
+        groups.push({ call: step, result: next });
+        i++;
+      } else {
+        groups.push({ call: step });
+      }
+    } else if (step.type === 'tool_result' && !groups.some(g => g.result === step)) {
+      groups.push({ result: step });
+    } else if (step.type === 'thinking') {
+      groups.push({ thinking: step });
+    } else if (step.type === 'status') {
+      groups.push({ status: step });
+    }
+  }
+  return groups;
+}
+
+function ToolCard({ call, result }: { call?: AgentStep; result?: AgentStep }) {
+  const [showResult, setShowResult] = useState(false);
+  const toolName = call?.tool || result?.tool || 'unknown';
+  const isSuccess = result?.success !== false;
+  const hasFailed = result && !result.success;
+  const duration = result?.duration;
+  const args = call?.args;
+  const argsStr = formatToolArgs(toolName, args);
+  const isWebBrowse = toolName === 'web_browse' || toolName === 'browser';
+  const url = isWebBrowse ? String(args?.['url'] || '') : '';
+  const resultTitle = extractResultTitle(result?.result);
+  const resultText = result?.result || '';
+
+  return (
+    <div className={cn(
+      'rounded-lg border overflow-hidden transition-all',
+      hasFailed
+        ? 'border-red-500/20 bg-red-500/[0.03]'
+        : result
+          ? 'border-green-500/15 bg-green-500/[0.02]'
+          : 'border-zinc-700/40 bg-zinc-800/30'
+    )}>
+      <div
+        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-white/[0.02] transition-colors"
+        onClick={() => resultText && setShowResult(!showResult)}
+      >
+        <div className={cn(
+          'w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0',
+          hasFailed ? 'bg-red-500/10' : 'bg-blue-500/10'
+        )}>
+          <span className={hasFailed ? 'text-red-400' : 'text-blue-400'}>
+            {getToolIcon(toolName)}
+          </span>
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-200">{toolName}</span>
+            {duration !== undefined && (
+              <span className="text-[10px] text-zinc-500 tabular-nums">{duration}ms</span>
+            )}
+          </div>
+          {isWebBrowse && url ? (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-blue-400/70 hover:text-blue-400 truncate block mt-0.5"
+              onClick={e => e.stopPropagation()}
+            >
+              {url.length > 80 ? url.substring(0, 80) + '...' : url}
+            </a>
+          ) : argsStr ? (
+            <p className="text-[11px] text-zinc-500 truncate mt-0.5">{argsStr}</p>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {result && (
+            hasFailed
+              ? <XCircle className="w-4 h-4 text-red-400" />
+              : <CheckCircle2 className="w-4 h-4 text-green-400" />
+          )}
+          {resultText && (
+            showResult
+              ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+              : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+          )}
+        </div>
+      </div>
+
+      {resultTitle && !showResult && (
+        <div className="px-3 pb-2 -mt-0.5">
+          <p className="text-[11px] text-zinc-400 truncate pl-8">{resultTitle}</p>
+        </div>
+      )}
+
+      {showResult && resultText && (
+        <div className="border-t border-zinc-700/20 px-3 py-2">
+          <pre className="text-[11px] text-zinc-400 whitespace-pre-wrap break-all max-h-40 overflow-y-auto leading-relaxed font-mono">
+            {resultText.substring(0, 800)}{resultText.length > 800 ? '\n...' : ''}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StepRenderer({ steps }: { steps: AgentStep[] }) {
@@ -183,69 +306,57 @@ function StepRenderer({ steps }: { steps: AgentStep[] }) {
   const thinkingSteps = steps.filter(s => s.type === 'thinking');
   const successes = steps.filter(s => s.type === 'tool_result' && s.success).length;
   const failures = steps.filter(s => s.type === 'tool_result' && !s.success).length;
+  const grouped = groupSteps(steps);
 
   return (
     <div className="mt-3 pt-3 border-t border-zinc-700/30">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
+        className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-300 transition-colors w-full"
       >
         {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        <span className="font-medium flex items-center gap-2">
-          {thinkingSteps.length > 0 && <span className="text-amber-400 inline-flex items-center gap-0.5"><Brain className="w-3 h-3" /> {thinkingSteps.length}</span>}
-          {toolCalls.length > 0 && <span className="text-blue-400 inline-flex items-center gap-0.5"><Wrench className="w-3 h-3" /> {toolCalls.length} ação{toolCalls.length > 1 ? 'ões' : ''}</span>}
-          {successes > 0 && <span className="text-green-400 inline-flex items-center gap-0.5"><CheckCircle2 className="w-3 h-3" />{successes}</span>}
-          {failures > 0 && <span className="text-red-400 inline-flex items-center gap-0.5"><XCircle className="w-3 h-3" />{failures}</span>}
+        <span className="font-medium flex items-center gap-3">
+          {thinkingSteps.length > 0 && (
+            <span className="text-amber-400 inline-flex items-center gap-1">
+              <Brain className="w-3 h-3" /> {thinkingSteps.length}
+            </span>
+          )}
+          {toolCalls.length > 0 && (
+            <span className="text-blue-400 inline-flex items-center gap-1">
+              <Wrench className="w-3 h-3" /> {toolCalls.length} action{toolCalls.length > 1 ? 's' : ''}
+            </span>
+          )}
+          {successes > 0 && (
+            <span className="text-green-400 inline-flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> {successes}
+            </span>
+          )}
+          {failures > 0 && (
+            <span className="text-red-400 inline-flex items-center gap-1">
+              <XCircle className="w-3 h-3" /> {failures}
+            </span>
+          )}
         </span>
       </button>
       {expanded && (
-        <div className="mt-2 space-y-2 pl-1">
-          {steps.map((step, i) => (
+        <div className="mt-2 space-y-1.5">
+          {grouped.map((group, i) => (
             <div key={i}>
-              {step.type === 'thinking' && (
+              {group.thinking && (
                 <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/10 rounded-lg px-3 py-2">
                   <Brain className="w-3.5 h-3.5 mt-0.5 text-amber-400 flex-shrink-0" />
                   <p className="text-xs text-amber-200/80 whitespace-pre-wrap leading-relaxed">
-                    {step.message}
+                    {group.thinking.message}
                   </p>
                 </div>
               )}
-              {step.type === 'tool_call' && (
-                <div className="flex items-start gap-2 text-xs">
-                  <div className="text-blue-400 mt-0.5 flex-shrink-0">{getToolIcon(step.tool)}</div>
-                  <div className="min-w-0">
-                    <span className="text-blue-400 font-semibold">{step.tool}</span>
-                    <span className="text-zinc-500 ml-1.5 break-all">
-                      {formatToolArgs(step.tool, step.args)}
-                    </span>
-                  </div>
-                </div>
+              {(group.call || group.result) && (
+                <ToolCard call={group.call} result={group.result} />
               )}
-              {step.type === 'tool_result' && (
-                <div className={cn(
-                  'flex items-start gap-2 text-xs ml-5 pl-2 border-l-2',
-                  step.success ? 'border-green-500/30' : 'border-red-500/30'
-                )}>
-                  {step.success
-                    ? <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 text-green-400 flex-shrink-0" />
-                    : <XCircle className="w-3.5 h-3.5 mt-0.5 text-red-400 flex-shrink-0" />
-                  }
-                  <div className="min-w-0">
-                    <span className={cn('font-medium', step.success ? 'text-green-400' : 'text-red-400')}>
-                      {step.tool} {step.duration !== undefined ? `(${step.duration}ms)` : ''}
-                    </span>
-                    {step.result && (
-                      <pre className="mt-1 text-zinc-500 whitespace-pre-wrap break-all text-[10px] max-h-24 overflow-y-auto leading-relaxed">
-                        {step.result.substring(0, 400)}{step.result.length > 400 ? '...' : ''}
-                      </pre>
-                    )}
-                  </div>
-                </div>
-              )}
-              {step.type === 'status' && (
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
+              {group.status && (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 px-1">
                   <Clock className="w-3 h-3" />
-                  <span>{step.message}</span>
+                  <span>{group.status.message}</span>
                 </div>
               )}
             </div>
@@ -991,43 +1102,81 @@ export function ChatPage() {
                   )}
                 </div>
                 {liveProgress && liveProgress.steps.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-zinc-700/30 space-y-2 max-h-80 overflow-y-auto">
-                    {liveProgress.steps.slice(-12).map((step, i) => (
-                      <div key={i}>
-                        {step.type === 'thinking' && (
-                          <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/10 rounded-lg px-2.5 py-1.5">
-                            <Brain className="w-3 h-3 mt-0.5 text-amber-400 flex-shrink-0" />
-                            <p className="text-[11px] text-amber-200/80 whitespace-pre-wrap leading-relaxed line-clamp-4">
-                              {step.message}
-                            </p>
-                          </div>
-                        )}
-                        {step.type === 'tool_call' && (
-                          <div className="flex items-start gap-1.5 text-[11px]">
-                            <div className="text-blue-400 mt-0.5 flex-shrink-0">{getToolIcon(step.tool)}</div>
-                            <div className="min-w-0">
-                              <span className="text-blue-400 font-semibold">{step.tool}</span>
-                              {step.message && (
-                                <span className="text-zinc-500 ml-1 break-all">
-                                  {step.message.length > 100 ? step.message.substring(0, 100) + '...' : step.message}
-                                </span>
-                              )}
+                  <div className="mt-2 pt-2 border-t border-zinc-700/30 space-y-1.5 max-h-80 overflow-y-auto">
+                    {(() => {
+                      const liveSteps = liveProgress.steps.slice(-12);
+                      const grouped: Array<{ call?: typeof liveSteps[0]; result?: typeof liveSteps[0]; thinking?: typeof liveSteps[0] }> = [];
+                      for (let idx = 0; idx < liveSteps.length; idx++) {
+                        const s = liveSteps[idx];
+                        if (s.type === 'tool_call') {
+                          const next = liveSteps[idx + 1];
+                          if (next && next.type === 'tool_result') {
+                            grouped.push({ call: s, result: next });
+                            idx++;
+                          } else {
+                            grouped.push({ call: s });
+                          }
+                        } else if (s.type === 'tool_result' && !grouped.some(g => g.result === s)) {
+                          grouped.push({ result: s });
+                        } else if (s.type === 'thinking') {
+                          grouped.push({ thinking: s });
+                        }
+                      }
+                      return grouped.map((g, i) => (
+                        <div key={i}>
+                          {g.thinking && (
+                            <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/10 rounded-lg px-2.5 py-1.5">
+                              <Brain className="w-3 h-3 mt-0.5 text-amber-400 flex-shrink-0" />
+                              <p className="text-[11px] text-amber-200/80 whitespace-pre-wrap leading-relaxed line-clamp-4">
+                                {g.thinking.message}
+                              </p>
                             </div>
-                          </div>
-                        )}
-                        {step.type === 'tool_result' && (
-                          <div className={`flex items-start gap-1.5 text-[11px] ml-5 pl-2 border-l-2 ${step.success ? 'border-green-500/30' : 'border-red-500/30'}`}>
-                            {step.success
-                              ? <CheckCircle2 className="w-3 h-3 mt-0.5 text-green-400 flex-shrink-0" />
-                              : <XCircle className="w-3 h-3 mt-0.5 text-red-400 flex-shrink-0" />
-                            }
-                            <span className={step.success ? 'text-green-400' : 'text-red-400'}>
-                              {step.tool} {step.duration !== undefined ? `(${step.duration}ms)` : ''}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                          )}
+                          {(g.call || g.result) && (
+                            <div className={cn(
+                              'rounded-lg border overflow-hidden',
+                              g.result && !g.result.success
+                                ? 'border-red-500/20 bg-red-500/[0.03]'
+                                : g.result
+                                  ? 'border-green-500/15 bg-green-500/[0.02]'
+                                  : 'border-zinc-700/40 bg-zinc-800/30'
+                            )}>
+                              <div className="flex items-center gap-2 px-2.5 py-1.5">
+                                <div className={cn(
+                                  'w-5 h-5 rounded flex items-center justify-center flex-shrink-0',
+                                  g.result && !g.result.success ? 'bg-red-500/10' : 'bg-blue-500/10'
+                                )}>
+                                  <span className={cn('scale-90', g.result && !g.result.success ? 'text-red-400' : 'text-blue-400')}>
+                                    {getToolIcon(g.call?.tool || g.result?.tool)}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-[11px] font-semibold text-zinc-200">
+                                    {g.call?.tool || g.result?.tool}
+                                  </span>
+                                  {g.result?.duration !== undefined && (
+                                    <span className="text-[10px] text-zinc-500 ml-1.5 tabular-nums">{g.result.duration}ms</span>
+                                  )}
+                                  {g.call?.message && (
+                                    <p className="text-[10px] text-zinc-500 truncate">
+                                      {g.call.message.length > 80 ? g.call.message.substring(0, 80) + '...' : g.call.message}
+                                    </p>
+                                  )}
+                                </div>
+                                {g.result && (
+                                  g.result.success
+                                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                                    : <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                                )}
+                                {g.call && !g.result && (
+                                  <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>

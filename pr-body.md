@@ -1,92 +1,88 @@
 ## Description
 
-Phase 26 — Complete RAG Engine overhaul. Added persistence (documents survive restarts), runtime config API, file upload support (PDF/TXT/MD/code), OpenAI embeddings as alternative to TF-IDF, and a full dashboard page for managing the knowledge base. **18 dashboard pages** total (was 17).
+Cross-platform desktop automation (macOS/Linux/Windows), file manager full system access, CLI ASCII banner, and dashboard chat UI redesign.
 
 ## Type of Change
 
 - [ ] 🐛 Bug fix
 - [x] ✨ New feature
-- [ ] ♻️ Refactor (no functional changes)
+- [x] ♻️ Refactor (no functional changes)
 - [x] 📝 Documentation
-- [x] 🧪 Tests
+- [ ] 🧪 Tests
 - [ ] 🔒 Security
 
 ## Changes Made
 
-### 1. RAG Persistence
+### 1. Desktop Automation — Full macOS Support
 
-- Documents saved as JSON to `.forgeai/rag/` directory
-- Auto-loaded on gateway startup (TF-IDF re-indexed)
-- Config persisted to `_config.json` (survives restarts)
-- Safe filename sanitization for document IDs
+- **AppleScript** for window management: list_windows, focus_window, send_keys, type_text
+- **screencapture** for screenshots (native, no dependencies)
+- **Vision framework** for OCR via Swift (native macOS 10.15+, fallback to tesseract)
+- **pbcopy/pbpaste** for clipboard access
+- **open -a** for launching applications
+- **cliclick/Quartz** for mouse click automation
+- **UI Automation** for reading window text elements
 
-### 2. Runtime Config API
+### 2. Desktop Automation — Linux Improvements
 
-- `GET /api/rag/config` — get current config
-- `POST /api/rag/config` — update any config field at runtime
-- All 7 config fields editable: chunkSize, chunkOverlap, maxResults, similarityThreshold, embeddingProvider, embeddingModel, persist
+- **Wayland support**: ydotool, wlrctl, grim, wtype as alternatives to X11 tools
+- **OCR via tesseract**: `sudo apt install tesseract-ocr`
+- **Dependency detection**: clear error messages when tools are missing with install commands
+- **read_window_text**: improved with xdotool + xprop
+- **New `system_info` action**: detects OS, arch, root status, and available capabilities per platform
 
-### 3. File Upload
+### 3. File Manager — Full System Access
 
-- `POST /api/rag/upload` — multipart file upload
-- `@fastify/multipart` registered (50MB limit)
-- `extractTextFromFile()` supports 30+ file types: TXT, MD, CSV, JSON, XML, YAML, HTML, PDF, JS, TS, PY, Java, C/C++, CSS, SQL, SH, etc.
-- Basic PDF text extraction (BT/ET text streams, no external deps)
+- **Removed sandbox restriction**: absolute paths (`/etc/nginx/...`, `C:\Users\...`) now access anywhere
+- **6 new actions**: `mkdir`, `copy`, `move`, `search`, `permissions` (chmod), `disk_info`
+- **Max file size**: 5MB → 50MB
+- **Permissions display**: shows Unix permissions and owner (uid/gid) on Linux
+- **Silent operations**: Windows file ops run without opening visible windows
 
-### 4. OpenAI Embeddings
+### 4. CLI — ASCII Art Banner
 
-- `embeddingProvider: 'openai'` — uses `text-embedding-3-small` via OpenAI API
-- Batch embedding for efficient ingestion (`embedOpenAIBatch`)
-- `ingestAsync()` — async ingest with OpenAI embeddings
-- `searchAsync()` — async search with OpenAI query embeddings
-- Auto-fallback to TF-IDF if API key missing or request fails
+- ForgeAI ASCII art logo in orange displayed on every command
+- Platform info line: "10 LLM Providers · 13 Tools · 7 Channels · Security-First"
+- Improved `forge start` output with colored status and security module checkmarks
+- Banner shows on `forge` (no args), `forge start`, `forge doctor`, `forge status`
 
-### 5. Dashboard RAG Page (18th page)
+### 5. Dashboard — Chat UI Redesign
 
-- **Documents tab**: list all documents with metadata, chunk count, size, delete
-- **Search tab**: semantic search with score display
-- **Upload tab**: file upload (drag & drop) + paste text ingest
-- **Settings tab**: edit all config fields, embedding provider selector, save/cancel
+- **Grouped cards**: tool_call + tool_result merged into unified collapsible cards
+- **Color-coded borders**: green (success), red (error), gray (running)
+- **Clickable URLs**: web_browse results show truncated clickable links
+- **Extracted titles**: result preview without expanding
+- **Collapsible results**: collapsed by default, click to expand
+- **Live progress**: updated to match card-based style during agent execution
+
+### 6. README — URL Updates
+
+- All `git clone` URLs updated from `diegofelipeee/ForgeAI` to `forgeai-dev/ForgeAI`
 
 ---
 
-## Files Changed (10 files)
+## Files Changed (6 files)
 
 | File | Change |
 |:-----|:-------|
-| `packages/agent/src/rag-engine.ts` | Persistence, config API, OpenAI embeddings, file extraction, ingestAsync, searchAsync |
-| `packages/agent/src/index.ts` | Export extractTextFromFile, EmbeddingProvider type |
-| `packages/core/src/gateway/server.ts` | Register @fastify/multipart plugin |
-| `packages/core/src/gateway/chat-routes.ts` | RAG config endpoints, file upload endpoint |
-| `packages/core/package.json` | Added @fastify/multipart dependency |
-| `packages/dashboard/src/pages/RAG.tsx` | **NEW** — Full RAG management page |
-| `packages/dashboard/src/App.tsx` | Register /rag route |
-| `packages/dashboard/src/components/Layout.tsx` | Add RAG to sidebar nav |
-| `README.md` | 26 phases, 18 pages, RAG upgrade in roadmap |
-| `tests/api.test.ts` | Added RAG config GET/POST tests (57 total) |
+| `packages/tools/src/tools/desktop-automation.ts` | macOS AppleScript support, Linux Wayland/OCR, system_info action |
+| `packages/tools/src/tools/file-manager.ts` | Full system access, 6 new actions, removed sandbox |
+| `packages/cli/src/index.ts` | ASCII art banner, preAction hook |
+| `packages/cli/src/commands/start.ts` | Colored startup output |
+| `packages/dashboard/src/pages/Chat.tsx` | Card-based tool execution display |
+| `README.md` | Updated git clone URLs to forgeai-dev org |
 
 ## How to Test
 
 1. `pnpm -r build`
-2. `pnpm forge start --migrate`
-3. `pnpm test` — expect **57/57 tests passing**
-4. Open dashboard → RAG page → upload a .txt or .md file
-5. Switch to Search tab → search for content from uploaded file
-6. Settings tab → change embedding provider or chunk size → Save
-7. Restart gateway → verify documents are still there (persistence)
-
-## Related Issue
-
-N/A
-
-## Screenshots
-
-N/A
+2. `pnpm forge start --migrate` — verify ASCII banner appears
+3. Open dashboard → Chat → send a message that triggers tool execution → verify card UI
+4. Test `desktop action=system_info` to verify OS capability detection
+5. Test `file_manager action=list path=/` (Linux) or `path=C:\` (Windows) for full system access
 
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
-- [x] Tests pass (`pnpm test`) — 57/57
 - [x] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [x] No secrets or API keys committed
-- [x] Documentation updated (README roadmap, dashboard page count)
+- [x] Documentation updated (README URLs)
