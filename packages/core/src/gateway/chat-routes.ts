@@ -590,10 +590,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const chatId = inbound.groupId ?? inbound.senderId;
 
-        // Voice message → STT transcription
+        // Voice message → STT transcription (always attempt if audio + OpenAI key available)
         let messageContent = inbound.content;
         let isVoiceMessage = false;
-        if (inbound.audio && voiceEngine?.isEnabled()) {
+        if (inbound.audio && voiceEngine) {
           try {
             const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
             messageContent = sttResult.text;
@@ -601,8 +601,24 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
             logger.info('Voice transcribed (Telegram)', { text: messageContent.substring(0, 100), confidence: sttResult.confidence });
           } catch (err) {
             logger.error('STT transcription failed (Telegram)', err);
-            messageContent = '[Voice message — transcription failed]';
+            await telegramChannel!.send({
+              channelType: 'telegram',
+              recipientId: inbound.senderId,
+              groupId: inbound.groupId,
+              content: '🎤 Não consegui transcrever o áudio. Verifique se a OPENAI_API_KEY está configurada no Dashboard → Settings.',
+              replyToId: inbound.channelMessageId,
+            });
+            return;
           }
+        } else if (inbound.audio && !voiceEngine) {
+          await telegramChannel!.send({
+            channelType: 'telegram',
+            recipientId: inbound.senderId,
+            groupId: inbound.groupId,
+            content: '🎤 Mensagens de voz não estão disponíveis. Configure a OPENAI_API_KEY para habilitar transcrição via Whisper.',
+            replyToId: inbound.channelMessageId,
+          });
+          return;
         }
 
         // Persist inbound user message to chat history
@@ -826,16 +842,16 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const waJid = inbound.groupId ?? inbound.senderId;
 
-        // Voice message → STT transcription
+        // Voice message → STT transcription (always attempt if audio + OpenAI key available)
         let waMessageContent = inbound.content;
-        if (inbound.audio && voiceEngine?.isEnabled()) {
+        if (inbound.audio && voiceEngine) {
           try {
             const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
             waMessageContent = sttResult.text;
             logger.info('Voice transcribed (WhatsApp)', { text: waMessageContent.substring(0, 100), confidence: sttResult.confidence });
           } catch (err) {
             logger.error('STT transcription failed (WhatsApp)', err);
-            waMessageContent = '[Voice message — transcription failed]';
+            waMessageContent = '🎤 [Áudio recebido mas transcrição falhou — verifique OPENAI_API_KEY]';
           }
         }
 

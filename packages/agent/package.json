@@ -9,8 +9,10 @@
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@forgeai/security": "workspace:*",
     "@forgeai/shared": "workspace:*",
-    "@forgeai/security": "workspace:*"
+    "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

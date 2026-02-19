@@ -160,18 +160,117 @@ class OpenAISTTAdapter implements STTAdapter {
   }
 }
 
+/** Free local Whisper STT via @huggingface/transformers — no API key needed */
+class LocalWhisperSTTAdapter implements STTAdapter {
+  readonly provider: STTProvider = 'whisper-local';
+  private pipeline: any = null;
+  private loading: Promise<any> | null = null;
+
+  isConfigured(): boolean {
+    // Always available — no API key required
+    return true;
+  }
+
+  private async getPipeline(): Promise<any> {
+    if (this.pipeline) return this.pipeline;
+    if (this.loading) return this.loading;
+
+    this.loading = (async () => {
+      logger.info('Local Whisper: loading model (first time may download ~75MB)...');
+      const { pipeline } = await import('@huggingface/transformers');
+      const modelId = process.env.WHISPER_MODEL ?? 'onnx-community/whisper-tiny';
+      this.pipeline = await pipeline('automatic-speech-recognition', modelId, {
+        dtype: 'q4',
+        device: 'cpu',
+      });
+      logger.info('Local Whisper: model loaded', { model: modelId });
+      return this.pipeline;
+    })();
+
+    return this.loading;
+  }
+
+  async transcribe(request: STTRequest): Promise<STTResponse> {
+    const start = Date.now();
+
+    const transcriber = await this.getPipeline();
+
+    // Whisper expects Float32Array PCM at 16kHz mono
+    // Use ffmpeg-static (bundled binary) to decode OGG/Opus → raw PCM
+    const { writeFileSync, readFileSync, unlinkSync, mkdtempSync, rmdirSync } = await import('fs');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const { execFileSync } = await import('child_process');
+
+    const audioBuffer = request.audio instanceof ArrayBuffer
+      ? Buffer.from(request.audio)
+      : request.audio;
+
+    const ext = request.format ?? 'ogg';
+    const tempDir = mkdtempSync(join(tmpdir(), 'forgeai-stt-'));
+    const inputFile = join(tempDir, `audio.${ext}`);
+    const rawFile = join(tempDir, 'audio.raw');
+
+    try {
+      writeFileSync(inputFile, audioBuffer);
+
+      // Get ffmpeg binary path from @ffmpeg-installer/ffmpeg (npm-bundled, no system install needed)
+      const { path: ffmpegPath } = await import('@ffmpeg-installer/ffmpeg');
+
+      // Convert any audio format → raw PCM Float32 Little-Endian, 16kHz, mono
+      execFileSync(ffmpegPath, [
+        '-i', inputFile,
+        '-ar', '16000',
+        '-ac', '1',
+        '-f', 'f32le',
+        '-y', rawFile,
+      ], { stdio: 'pipe' });
+
+      // Read raw PCM and create Float32Array
+      const rawBuffer = readFileSync(rawFile);
+      const audioData = new Float32Array(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.byteLength / 4);
+
+      logger.info('Local Whisper: audio decoded', { samples: audioData.length, durationSec: (audioData.length / 16000).toFixed(1) });
+
+      const result = await transcriber(audioData, {
+        language: request.language ?? 'pt',
+        task: 'transcribe',
+        return_timestamps: false,
+      });
+
+      const text = typeof result === 'string' ? result : (result as any).text ?? '';
+
+      return {
+        text: text.trim(),
+        confidence: 0.85,
+        language: request.language ?? 'pt',
+        durationMs: Date.now() - start,
+        provider: 'whisper-local',
+      };
+    } finally {
+      // Cleanup temp files
+      try { unlinkSync(inputFile); } catch { /* ignore */ }
+      try { unlinkSync(rawFile); } catch { /* ignore */ }
+      try { rmdirSync(tempDir); } catch { /* ignore */ }
+    }
+  }
+}
+
 export class VoiceEngine {
   private ttsAdapters: Map<TTSProvider, TTSAdapter> = new Map();
   private sttAdapters: Map<STTProvider, STTAdapter> = new Map();
   private config: VoiceConfig;
 
   constructor(config?: Partial<VoiceConfig>) {
+    // Auto-select STT: use OpenAI Whisper if key available, otherwise local (free)
+    const defaultSTT: STTProvider = process.env.OPENAI_API_KEY ? 'whisper' : 'whisper-local';
+
     this.config = {
       ttsProvider: config?.ttsProvider ?? 'openai',
-      sttProvider: config?.sttProvider ?? 'whisper',
+      sttProvider: config?.sttProvider ?? defaultSTT,
       ttsVoice: config?.ttsVoice ?? 'alloy',
       ttsSpeed: config?.ttsSpeed ?? 1.0,
-      language: config?.language ?? 'en',
+      language: config?.language ?? 'pt',
       enabled: config?.enabled ?? false,
     };
 
@@ -179,6 +278,7 @@ export class VoiceEngine {
     this.ttsAdapters.set('elevenlabs', new ElevenLabsTTSAdapter());
     this.sttAdapters.set('whisper', new OpenAISTTAdapter());
     this.sttAdapters.set('openai', new OpenAISTTAdapter());
+    this.sttAdapters.set('whisper-local', new LocalWhisperSTTAdapter());
 
     logger.info('Voice engine initialized', { tts: this.config.ttsProvider, stt: this.config.sttProvider });
   }
