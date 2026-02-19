@@ -14,12 +14,12 @@
 
 <br />
 
-| 7 Channels | 8 LLM Providers | 11 Tools | 16 Dashboard Pages | 140+ API Endpoints | 7 Security Modules |
+| 7 Channels | 10 LLM Providers | 13 Tools | 17 Dashboard Pages | 140+ API Endpoints | 7 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
 
-[Getting Started](#-quick-start) · [Features](#-features-at-a-glance) · [Dashboard](#-dashboard-16-pages) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](./CONTRIBUTING.md)
+[Getting Started](#-quick-start) · [Features](#-features-at-a-glance) · [Dashboard](#-dashboard-17-pages) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](./CONTRIBUTING.md)
 
 </div>
 
@@ -33,12 +33,12 @@
 
 ## What is ForgeAI?
 
-ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, and a built-in WebChat — all managed through a modern 16-page dashboard.
+ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, and a built-in WebChat — all managed through a modern 17-page dashboard.
 
 Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 7 security modules before reaching the agent.
 
 ```
-Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 11 Tools ──→ Response
+Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 13 Tools ──→ Response
      ↑                                                              ↓
   WhatsApp                                                    Browse web
   Telegram                                                    Run code
@@ -69,11 +69,11 @@ The agentic loop runs up to **25 iterations** per request. The agent browses the
 </td>
 <td width="50%">
 
-### 🔄 9 LLM Providers with Auto-Failover
-Anthropic, OpenAI, Google, Moonshot/Kimi, DeepSeek, xAI/Grok, Groq, Mistral, and **Local LLMs** (Ollama/LM Studio/llama.cpp). Circuit breaker per provider, exponential backoff, automatic fallback chain. Cloud ↔ local failover — if all cloud providers go down, your local model picks up.
+### 🔄 10 LLM Providers with Auto-Failover
+Anthropic, OpenAI, Google, Moonshot/Kimi, DeepSeek, xAI/Grok, Groq, Mistral, **Local LLMs** (Ollama), and **OpenAI-Compatible** (LM Studio/llama.cpp/vLLM). Circuit breaker per provider, exponential backoff, automatic fallback chain. Cloud ↔ local failover — if all cloud providers go down, your local model picks up.
 
 ### 📊 Full Observability
-17-page dashboard with real-time WebSocket updates. See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
+17-page dashboard with real-time WebSocket updates (including RAG management, Voice, and more). See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
 
 ### 🧩 Extensible Everything
 Plugin SDK for custom behaviors. MCP Client for external tool servers. Workflow engine for multi-step automation. RAG engine for document search. REST API with 140+ endpoints for full programmatic control.
@@ -121,7 +121,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **Google Chat** | Chat API | Webhook + async REST, service account JWT, space routing |
 | **WebChat** | Built-in | Browser-based, real-time execution steps, session persistence |
 
-### LLM Providers (9) with Automatic Failover
+### LLM Providers (10) with Automatic Failover
 
 | Provider | Models | Balance API |
 |:---------|:-------|:------------|
@@ -134,6 +134,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **Groq** | Llama 3.3 70B, Mixtral 8x7B, Gemma2 | — |
 | **Mistral** | Mistral Large, Small, Codestral, Pixtral | — |
 | **Local (Ollama)** | Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek-R1 | — |
+| **OpenAI-Compatible** | Any OpenAI-compatible API (LM Studio, llama.cpp, vLLM, etc.) | — |
 
 All model lists are **configurable per provider** via the dashboard Settings page or the `POST /api/providers/:name/models` API endpoint. Custom models are stored encrypted in Vault.
 
@@ -146,12 +147,12 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `web_browse` | HTTP fetch + parse (Cheerio). GET/POST/PUT/DELETE, custom headers, extract: text/links/images/tables/metadata/json. |
 | `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab. |
 | `web_search` | Search Google/DuckDuckGo — returns structured results (title, URL, snippet). Auto-fallback between engines. |
-| `file_manager` | Sandboxed CRUD. Path traversal protection. Blocks `.exe`, `.bat`, `.sh`. |
+| `file_manager` | Full system file manager: read, write, list, delete, copy, move, search, permissions (chmod), disk info. Supports absolute paths for full system access. |
 | `shell_exec` | Execute system commands with timeout, output capture, and error handling. |
 | `code_run` | JavaScript execution in isolated `node:vm` sandbox. No fs/net/process. |
 | `cron_scheduler` | Schedule recurring tasks with cron expressions. Pause/resume/cancel via API. |
 | `knowledge_base` | Document store with TF-IDF vector search. Full CRUD + semantic query. |
-| `desktop` | Native desktop actions: mouse control, keyboard input, window management. |
+| `desktop` | Cross-platform desktop automation (Windows/macOS/Linux): mouse, keyboard, screenshots, OCR, window management, clipboard. macOS via AppleScript, Linux with X11+Wayland support. |
 | `sessions_list` | Discover all active agent sessions and their metadata. |
 | `sessions_history` | Fetch full transcript of any session (agent-to-agent communication). |
 | `sessions_send` | Send messages between agents for collaborative multi-agent workflows. |
@@ -178,7 +179,7 @@ Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ─�
 
 ---
 
-## 📊 Dashboard (16 Pages)
+## 📊 Dashboard (17 Pages)
 
 The dashboard is a full-featured React 19 SPA served directly by the Gateway. No separate deployment needed.
 
@@ -233,6 +234,8 @@ The dashboard is a full-featured React 19 SPA served directly by the Gateway. No
 | **Webhooks** | Outbound webhooks (URL + events), inbound webhooks (path + handler), event log with status/duration/timestamp |
 | **Audit Log** | Security event viewer with risk level color coding, action filtering, detail expansion |
 | **Settings** | Provider API key management (validated via test call before saving, stored encrypted), system configuration |
+| **RAG** | Document upload (PDF/TXT/MD/code), semantic search with score display, config editor (chunk size, embedding provider), persistence |
+| **Voice** | Text-to-Speech (OpenAI TTS) and Speech-to-Text (Whisper), voice input/output for agent interactions |
 
 ---
 
@@ -358,10 +361,10 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
               ┌────────────▼──┐  ┌────▼──────────┐
               │  AGENT LAYER   │  │   TOOL LAYER   │
               │                │  │                 │
-              │ AgentManager   │  │ 11 built-in     │
+              │ AgentManager   │  │ 13 built-in     │
               │ AgentRuntime   │  │ MCP Client      │
               │ LLM Router     │  │ Tool Registry   │
-              │ 8 providers    │  │ Sandbox (Docker) │
+              │ 10 providers   │  │ Sandbox (Docker) │
               │ Circuit breaker│  │                 │
               │ Failover chain │  └────────┬────────┘
               │ Agentic loop   │           │
@@ -388,14 +391,14 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
 packages/
 ├── shared/      →  Types, utils, constants, logger
 ├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Sanitizer, IP Filter
-├── agent/       →  AgentRuntime, AgentManager, LLM Router (8 providers), UsageTracker, Agentic Loop
+├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), UsageTracker, Agentic Loop
 ├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
-├── tools/       →  Tool Registry, 11 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
+├── tools/       →  Tool Registry, 13 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
 ├── plugins/     →  Plugin Manager, Plugin SDK, AutoResponder, ContentFilter, ChatCommands
 ├── workflows/   →  Workflow Engine, step runner, dependency graph, parallel execution
 ├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing
 ├── cli/         →  CLI commands: start, doctor, status, onboard
-└── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (16 pages)
+└── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
 ```
 
 ---
@@ -558,18 +561,19 @@ pnpm forge status      # Quick status check
 All core features are implemented and tested:
 
 - **Security** — 7 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, audit
-- **Agent** — Multi-LLM router (9 providers incl. Ollama local), agentic loop (25 iter), thinking levels, failover + circuit breaker
+- **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
 - **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
-- **Dashboard** — 18 pages, WebSocket real-time, provider balance tracking
+- **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
-- **Configurable Models** — All 9 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
+- **Configurable Models** — All 10 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
-- **RAG Engine Upgrade** — Persistence (JSON to disk, auto-load on startup), runtime config API, file upload (PDF/TXT/MD/code), OpenAI embeddings support, dashboard RAG page (18th page)
+- **RAG Engine Upgrade** — Persistence (JSON to disk, auto-load on startup), runtime config API, file upload (PDF/TXT/MD/code), OpenAI embeddings support, dashboard RAG page
+- **Cross-Platform Desktop** — Full macOS support (AppleScript, Vision OCR, screencapture), Linux improvements (Wayland, tesseract OCR, dependency detection), file manager with full system access (absolute paths, copy/move/search/permissions/disk_info), CLI ASCII banner
 
 ### What's Next
 
