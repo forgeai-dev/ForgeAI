@@ -23,7 +23,7 @@ Thank you for your interest in contributing to ForgeAI! This guide will help you
    ```
 3. **Add upstream** remote:
    ```bash
-   git remote add upstream https://github.com/diegofelipeee/ForgeAI.git
+   git remote add upstream https://github.com/forgeai-dev/ForgeAI.git
    ```
 
 ## Development Setup
@@ -150,7 +150,7 @@ test: add E2E tests for Calendar integration
 
 ## Reporting Bugs
 
-Use the [Bug Report](https://github.com/diegofelipeee/ForgeAI/issues/new?template=bug_report.md) template. Include:
+Use the [Bug Report](https://github.com/forgeai-dev/ForgeAI/issues/new?template=bug_report.md) template. Include:
 
 - Steps to reproduce
 - Expected vs actual behavior
@@ -159,7 +159,7 @@ Use the [Bug Report](https://github.com/diegofelipeee/ForgeAI/issues/new?templat
 
 ## Feature Requests
 
-Use the [Feature Request](https://github.com/diegofelipeee/ForgeAI/issues/new?template=feature_request.md) template. Include:
+Use the [Feature Request](https://github.com/forgeai-dev/ForgeAI/issues/new?template=feature_request.md) template. Include:
 
 - Clear description of the feature
 - Why it would be useful
@@ -169,8 +169,8 @@ Use the [Feature Request](https://github.com/diegofelipeee/ForgeAI/issues/new?te
 
 ## Need Help?
 
-- Check existing [Issues](https://github.com/diegofelipeee/ForgeAI/issues) and [Discussions](https://github.com/diegofelipeee/ForgeAI/discussions)
-- Look for issues labeled [`good first issue`](https://github.com/diegofelipeee/ForgeAI/labels/good%20first%20issue)
+- Check existing [Issues](https://github.com/forgeai-dev/ForgeAI/issues) and [Discussions](https://github.com/forgeai-dev/ForgeAI/discussions)
+- Look for issues labeled [`good first issue`](https://github.com/forgeai-dev/ForgeAI/labels/good%20first%20issue)
 - Open a Discussion for questions
 
 Thank you for contributing! 🔥
