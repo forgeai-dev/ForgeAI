@@ -157,6 +157,7 @@ export function AgentsPage() {
                 <option value="groq">Groq</option>
                 <option value="mistral">Mistral</option>
                 <option value="xai">xAI (Grok)</option>
+                <option value="local">Local LLM (Ollama)</option>
               </select>
             </div>
             <div>
