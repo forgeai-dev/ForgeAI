@@ -43,6 +43,7 @@ export class OllamaProvider implements LLMProviderAdapter {
   readonly displayName = 'Local LLM (Ollama)';
 
   private baseUrl: string;
+  private apiKey: string;
   private cachedModels: string[] = [];
   private lastModelFetch = 0;
   private static readonly MODEL_CACHE_MS = 30_000; // refresh model list every 30s
@@ -58,9 +59,17 @@ export class OllamaProvider implements LLMProviderAdapter {
     'deepseek-r1:8b',
   ];
 
-  constructor(baseUrl?: string) {
+  constructor(baseUrl?: string, apiKey?: string) {
     this.baseUrl = (baseUrl || process.env['OLLAMA_BASE_URL'] || 'http://localhost:11434').replace(/\/+$/, '');
-    logger.info(`Ollama provider initialized → ${this.baseUrl}`);
+    this.apiKey = apiKey || process.env['OLLAMA_API_KEY'] || '';
+    logger.info(`Ollama provider initialized → ${this.baseUrl}`, { auth: this.apiKey ? 'Bearer token' : 'none' });
+  }
+
+  /** Build headers with optional auth */
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    const h: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+    if (this.apiKey) h['Authorization'] = `Bearer ${this.apiKey}`;
+    return h;
   }
 
   isConfigured(): boolean {
@@ -95,6 +104,7 @@ export class OllamaProvider implements LLMProviderAdapter {
 
     try {
       const res = await fetch(`${this.baseUrl}/api/tags`, {
+        headers: this.headers(),
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`Status ${res.status}`);
@@ -164,7 +174,7 @@ export class OllamaProvider implements LLMProviderAdapter {
   private async chatOpenAICompat(body: Record<string, unknown>, request: LLMRequest): Promise<LLMResponse> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 
@@ -207,7 +217,7 @@ export class OllamaProvider implements LLMProviderAdapter {
   private async chatNative(body: Record<string, unknown>, request: LLMRequest): Promise<LLMResponse> {
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 
@@ -256,7 +266,7 @@ export class OllamaProvider implements LLMProviderAdapter {
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 

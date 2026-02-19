@@ -39,6 +39,7 @@ export function SettingsPage() {
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [deleting, setDeleting] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [ollamaApiKey, setOllamaApiKey] = useState('');
 
   // Model editor state per provider
   const [editingModels, setEditingModels] = useState<string | null>(null);
@@ -180,13 +181,16 @@ export function SettingsPage() {
     setSaving(s => ({ ...s, [name]: true }));
     setErrors(e => ({ ...e, [name]: '' }));
     try {
-      const res = await api.post<{ success?: boolean; error?: string }>(`/api/providers/${name}/key`, { apiKey: key.trim() });
+      const body: Record<string, string> = { apiKey: key.trim() };
+      if (name === 'local' && ollamaApiKey.trim()) body.ollamaApiKey = ollamaApiKey.trim();
+      const res = await api.post<{ success?: boolean; error?: string }>(`/api/providers/${name}/key`, body);
       if (res.error) {
         setErrors(e => ({ ...e, [name]: res.error! }));
         setTimeout(() => setErrors(e => ({ ...e, [name]: '' })), 5000);
       } else {
         setSaved(s => ({ ...s, [name]: true }));
         setKeys(k => ({ ...k, [name]: '' }));
+        if (name === 'local') setOllamaApiKey('');
         setTimeout(() => setSaved(s => ({ ...s, [name]: false })), 2000);
         loadProviders();
       }
@@ -318,6 +322,33 @@ export function SettingsPage() {
                   )}
                   <p className="text-[10px] text-zinc-500 mt-1">Stored encrypted in Vault (AES-256-GCM)</p>
                 </div>
+
+                {/* Ollama API Key (optional, for remote servers with auth) */}
+                {name === 'local' && (
+                  <div className="pt-3 border-t border-zinc-800/50 space-y-2">
+                    <label className="text-xs text-zinc-400 block">API Key <span className="text-zinc-600">(optional — for remote servers with auth)</span></label>
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type={showKey['local-apikey'] ? 'text' : 'password'}
+                          placeholder="Bearer token for nginx/auth proxy..."
+                          value={ollamaApiKey}
+                          onChange={e => setOllamaApiKey(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleSave('local')}
+                          className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                        />
+                        <button
+                          aria-label={showKey['local-apikey'] ? 'Hide key' : 'Show key'}
+                          onClick={() => setShowKey(s => ({ ...s, 'local-apikey': !s['local-apikey'] }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                        >
+                          {showKey['local-apikey'] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-zinc-500">Sent as <code className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-400">Authorization: Bearer &lt;key&gt;</code> header. Use when running Ollama behind nginx or a reverse proxy with authentication.</p>
+                  </div>
+                )}
 
                 {/* Anthropic OAuth Subscription Section */}
                 {name === 'anthropic' && (

@@ -1408,7 +1408,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
   // POST /api/providers/:name/key — save API key and register provider
   app.post('/api/providers/:name/key', async (request: FastifyRequest) => {
     const { name } = request.params as { name: string };
-    const { apiKey } = request.body as { apiKey: string };
+    const { apiKey, ollamaApiKey } = request.body as { apiKey: string; ollamaApiKey?: string };
 
     if (!apiKey || apiKey.trim().length === 0) {
       return { error: 'API key is required' };
@@ -1433,7 +1433,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         groq: () => new GroqProvider(trimmedKey),
         deepseek: () => new DeepSeekProvider(trimmedKey),
         xai: () => new XAIProvider(trimmedKey),
-        local: () => new OllamaProvider(trimmedKey), // trimmedKey = base URL for local
+        local: () => new OllamaProvider(trimmedKey, ollamaApiKey?.trim() || undefined), // trimmedKey = base URL, ollamaApiKey = optional auth
       };
 
       const factory = providerMap[name];
@@ -1475,6 +1475,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       // Key is valid — persist to Vault and register
       if (vault?.isInitialized()) {
         vault.set(`env:${meta.envKey}`, trimmedKey);
+        // Save Ollama API key separately if provided
+        if (name === 'local' && ollamaApiKey?.trim()) {
+          vault.set('env:OLLAMA_API_KEY', ollamaApiKey.trim());
+          logger.info('Ollama API key saved to Vault');
+        }
         logger.info(`API key for ${name} saved to Vault`, { name });
       }
 
