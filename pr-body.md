@@ -1,63 +1,41 @@
 ## Description
 
-Cross-platform desktop automation (macOS/Linux/Windows), file manager full system access, CLI ASCII banner, and dashboard chat UI redesign.
+Add free local Whisper STT (Speech-to-Text) for Telegram/WhatsApp voice messages. No API key required — runs entirely on the user's machine using `@huggingface/transformers`. OpenAI Whisper API kept as premium alternative.
 
 ## Type of Change
 
-- [ ] 🐛 Bug fix
-- [x] ✨ New feature
-- [x] ♻️ Refactor (no functional changes)
-- [x] 📝 Documentation
-- [ ] 🧪 Tests
-- [ ] 🔒 Security
+- [x] Bug fix
+- [x] New feature
+- [ ] Refactor (no functional changes)
+- [ ] Documentation
+- [ ] Tests
+- [ ] Security
 
 ## Changes Made
 
-### 1. Desktop Automation — Full macOS Support
+### 1. Local Whisper STT Adapter (Free, No API Key)
 
-- **AppleScript** for window management: list_windows, focus_window, send_keys, type_text
-- **screencapture** for screenshots (native, no dependencies)
-- **Vision framework** for OCR via Swift (native macOS 10.15+, fallback to tesseract)
-- **pbcopy/pbpaste** for clipboard access
-- **open -a** for launching applications
-- **cliclick/Quartz** for mouse click automation
-- **UI Automation** for reading window text elements
+- **New `LocalWhisperSTTAdapter`** using `@huggingface/transformers` (whisper-tiny model, ~75MB)
+- **Auto-downloads model** on first voice message (cached locally after that)
+- **Cross-platform audio decoding** via `@ffmpeg-installer/ffmpeg` (OGG/Opus → PCM Float32 16kHz)
+- **No external dependencies** — ffmpeg binary bundled as npm package (Windows/Linux/macOS)
 
-### 2. Desktop Automation — Linux Improvements
+### 2. Auto-Select STT Provider
 
-- **Wayland support**: ydotool, wlrctl, grim, wtype as alternatives to X11 tools
-- **OCR via tesseract**: `sudo apt install tesseract-ocr`
-- **Dependency detection**: clear error messages when tools are missing with install commands
-- **read_window_text**: improved with xdotool + xprop
-- **New `system_info` action**: detects OS, arch, root status, and available capabilities per platform
+- **No `OPENAI_API_KEY`** → uses local Whisper (free, zero cost)
+- **With `OPENAI_API_KEY`** → uses OpenAI Whisper API (faster, higher quality)
+- **New `whisper-local` STT provider** type added to shared types
+- **Configurable model** via `WHISPER_MODEL` env var (default: `onnx-community/whisper-tiny`)
 
-### 3. File Manager — Full System Access
+### 3. Voice Message Flow Fix (Telegram & WhatsApp)
 
-- **Removed sandbox restriction**: absolute paths (`/etc/nginx/...`, `C:\Users\...`) now access anywhere
-- **6 new actions**: `mkdir`, `copy`, `move`, `search`, `permissions` (chmod), `disk_info`
-- **Max file size**: 5MB → 50MB
-- **Permissions display**: shows Unix permissions and owner (uid/gid) on Linux
-- **Silent operations**: Windows file ops run without opening visible windows
+- **Removed `isEnabled()` gate** — STT now works whenever `voiceEngine` is initialized, regardless of Voice toggle
+- **Clear user feedback** — if STT fails, sends actionable error message instead of `[Voice message]`
+- **Separate error handling** for Telegram and WhatsApp channels
 
-### 4. CLI — ASCII Art Banner
+### 4. Build Configuration
 
-- ForgeAI ASCII art logo in orange displayed on every command
-- Platform info line: "10 LLM Providers · 13 Tools · 7 Channels · Security-First"
-- Improved `forge start` output with colored status and security module checkmarks
-- Banner shows on `forge` (no args), `forge start`, `forge doctor`, `forge status`
-
-### 5. Dashboard — Chat UI Redesign
-
-- **Grouped cards**: tool_call + tool_result merged into unified collapsible cards
-- **Color-coded borders**: green (success), red (error), gray (running)
-- **Clickable URLs**: web_browse results show truncated clickable links
-- **Extracted titles**: result preview without expanding
-- **Collapsible results**: collapsed by default, click to expand
-- **Live progress**: updated to match card-based style during agent execution
-
-### 6. README — URL Updates
-
-- All `git clone` URLs updated from `diegofelipeee/ForgeAI` to `forgeai-dev/ForgeAI`
+- **`pnpm-workspace.yaml`** updated: `@ffmpeg-installer/ffmpeg`, `onnxruntime-node`, `sharp` moved to `onlyBuiltDependencies` so native binaries are downloaded correctly
 
 ---
 
@@ -65,24 +43,33 @@ Cross-platform desktop automation (macOS/Linux/Windows), file manager full syste
 
 | File | Change |
 |:-----|:-------|
-| `packages/tools/src/tools/desktop-automation.ts` | macOS AppleScript support, Linux Wayland/OCR, system_info action |
-| `packages/tools/src/tools/file-manager.ts` | Full system access, 6 new actions, removed sandbox |
-| `packages/cli/src/index.ts` | ASCII art banner, preAction hook |
-| `packages/cli/src/commands/start.ts` | Colored startup output |
-| `packages/dashboard/src/pages/Chat.tsx` | Card-based tool execution display |
-| `README.md` | Updated git clone URLs to forgeai-dev org |
+| `packages/shared/src/types/voice.ts` | Add `whisper-local` to `STTProvider` type |
+| `packages/agent/src/voice-engine.ts` | New `LocalWhisperSTTAdapter`, auto-select logic, ffmpeg decoding |
+| `packages/agent/package.json` | Add `@huggingface/transformers`, `@ffmpeg-installer/ffmpeg` |
+| `packages/core/src/gateway/chat-routes.ts` | Fix voice message handling for Telegram/WhatsApp |
+| `pnpm-workspace.yaml` | Allow native build scripts for audio packages |
+| `pnpm-lock.yaml` | Updated lockfile |
 
 ## How to Test
 
-1. `pnpm -r build`
-2. `pnpm forge start --migrate` — verify ASCII banner appears
-3. Open dashboard → Chat → send a message that triggers tool execution → verify card UI
-4. Test `desktop action=system_info` to verify OS capability detection
-5. Test `file_manager action=list path=/` (Linux) or `path=C:\` (Windows) for full system access
+1. `pnpm install` — downloads ffmpeg binary + transformers
+2. `pnpm -r build`
+3. `pnpm forge start --migrate`
+4. Send a voice message to the bot on Telegram
+5. Bot should transcribe the audio and respond to the content
+6. Check logs for `Local Whisper: model loaded` and `Voice transcribed (Telegram)`
+
+## Related Issue
+
+N/A
+
+## Screenshots
+
+N/A
 
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
 - [x] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [x] No secrets or API keys committed
-- [x] Documentation updated (README URLs)
+- [x] Cross-platform support (Windows/Linux/macOS via @ffmpeg-installer)
