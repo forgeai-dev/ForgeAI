@@ -123,22 +123,25 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 
 ### LLM Providers (10) with Automatic Failover
 
-| Provider | Models | Balance API |
-|:---------|:-------|:------------|
-| **OpenAI** | GPT-5.2, GPT-5, GPT-4.1, o3-pro, o4-mini | — |
-| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | — |
-| **Google** | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash | — |
-| **Moonshot** | Kimi K2.5, moonshot-v1-auto/128k | ✅ Real-time |
-| **DeepSeek** | DeepSeek Chat, Coder, Reasoner | ✅ Real-time |
-| **xAI** | Grok 4, Grok 3, Grok 2 | — |
-| **Groq** | Llama 3.3 70B, Mixtral 8x7B, Gemma2 | — |
-| **Mistral** | Mistral Large, Small, Codestral, Pixtral | — |
-| **Local (Ollama)** | Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek-R1 | — |
-| **OpenAI-Compatible** | Any OpenAI-compatible API (LM Studio, llama.cpp, vLLM, etc.) | — |
+| Provider | Models | Balance API | Subscription Plans |
+|:---------|:-------|:------------|:-------------------|
+| **OpenAI** | GPT-5.2, GPT-5, GPT-4.1, o3-pro, o4-mini | — | — |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | — | ✅ Pro / Max / CLI |
+| **Google** | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash | — | — |
+| **Moonshot** | Kimi K2.5, moonshot-v1-auto/128k | ✅ Real-time | — |
+| **DeepSeek** | DeepSeek Chat, Coder, Reasoner | ✅ Real-time | — |
+| **xAI** | Grok 4, Grok 3, Grok 2 | — | — |
+| **Groq** | Llama 3.3 70B, Mixtral 8x7B, Gemma2 | — | — |
+| **Mistral** | Mistral Large, Small, Codestral, Pixtral | — | — |
+| **Local (Ollama)** | Llama 3.1, Mistral, CodeLlama, Phi-3, Qwen, DeepSeek-R1 | — | — |
+| **OpenAI-Compatible** | Any OpenAI-compatible API (LM Studio, llama.cpp, vLLM, etc.) | — | — |
 
 All model lists are **configurable per provider** via the dashboard Settings page or the `POST /api/providers/:name/models` API endpoint. Custom models are stored encrypted in Vault.
 
 Every provider has **circuit breaker** protection (5-failure threshold, 2-minute cooldown), **exponential backoff** retries, and **automatic failover** to the next provider in the chain.
+
+> **💡 Subscription-Based API Access (Anthropic)**
+> You don't need a pay-as-you-go API key to use Claude. If you have a **Claude Pro**, **Max**, or **CLI** subscription plan, you can use the API key tied to your plan. ForgeAI treats it like any other Anthropic key — just paste it in Dashboard → Settings → Anthropic. The billing goes through your existing subscription instead of per-token charges. This is especially useful for accessing **Claude Opus 4.6** at a fixed monthly cost.
 
 ### Built-in Tools (13)
 
