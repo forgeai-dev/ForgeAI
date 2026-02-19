@@ -46,16 +46,46 @@ export class AnthropicProvider implements LLMProviderAdapter {
   readonly displayName = 'Anthropic (Claude)';
 
   private apiKey: string;
+  private oauthToken: string;
   private baseUrl: string;
   private customModels: string[] | null = null;
 
   constructor(apiKey?: string, baseUrl?: string) {
-    this.apiKey = apiKey || process.env['ANTHROPIC_API_KEY'] || '';
+    const key = apiKey || process.env['ANTHROPIC_API_KEY'] || '';
+    // Auto-detect OAuth tokens (sk-ant-oat01-*) vs regular API keys (sk-ant-api03-*)
+    if (key.startsWith('sk-ant-oat01-')) {
+      this.oauthToken = key;
+      this.apiKey = '';
+      logger.info('Anthropic: using OAuth token (subscription plan: Pro/Max/CLI)');
+    } else {
+      this.apiKey = key;
+      this.oauthToken = '';
+    }
     this.baseUrl = baseUrl || 'https://api.anthropic.com';
   }
 
   isConfigured(): boolean {
-    return this.apiKey.length > 0;
+    return this.apiKey.length > 0 || this.oauthToken.length > 0;
+  }
+
+  /** Returns true if using an OAuth subscription token instead of a standard API key */
+  isOAuth(): boolean {
+    return this.oauthToken.length > 0;
+  }
+
+  /** Build auth headers based on token type */
+  private authHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    };
+    if (this.oauthToken) {
+      // OAuth tokens use Bearer auth (Claude Pro/Max/CLI subscription)
+      headers['Authorization'] = `Bearer ${this.oauthToken}`;
+    } else {
+      headers['x-api-key'] = this.apiKey;
+    }
+    return headers;
   }
 
   listModels(): string[] {
@@ -91,17 +121,17 @@ export class AnthropicProvider implements LLMProviderAdapter {
 
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: this.authHeaders(),
       body: JSON.stringify(body),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       const retryable = response.status === 429 || response.status >= 500;
+      // Detect OAuth-specific errors and provide actionable message
+      if (this.oauthToken && (response.status === 401 || response.status === 403)) {
+        throw new LLMProviderError('anthropic', `OAuth token error (${response.status}): ${errorText}. OAuth subscription tokens may be temporarily unsupported by Anthropic. Use a standard API key from console.anthropic.com as fallback.`, response.status, false);
+      }
       throw new LLMProviderError('anthropic', `API error ${response.status}: ${errorText}`, response.status, retryable);
     }
 
@@ -151,16 +181,15 @@ export class AnthropicProvider implements LLMProviderAdapter {
 
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: this.authHeaders(),
       body: JSON.stringify(body),
     });
 
     if (!response.ok || !response.body) {
       const errorText = await response.text();
+      if (this.oauthToken && (response.status === 401 || response.status === 403)) {
+        throw new LLMProviderError('anthropic', `OAuth stream error (${response.status}): ${errorText}. OAuth subscription tokens may be temporarily unsupported. Use a standard API key from console.anthropic.com.`, response.status);
+      }
       throw new LLMProviderError('anthropic', `Stream error ${response.status}: ${errorText}`, response.status);
     }
 

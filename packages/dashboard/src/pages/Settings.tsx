@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 
 const PROVIDER_META: Record<string, { display: string; placeholder: string; models: string }> = {
@@ -318,6 +318,33 @@ export function SettingsPage() {
                   )}
                   <p className="text-[10px] text-zinc-500 mt-1">Stored encrypted in Vault (AES-256-GCM)</p>
                 </div>
+
+                {/* Anthropic OAuth Subscription Section */}
+                {name === 'anthropic' && (
+                  <div className="pt-3 border-t border-zinc-800/50 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                      <span className="text-[11px] font-medium text-purple-300">Claude Pro / Max / CLI Subscription</span>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 leading-relaxed">
+                      If you have a Claude <strong className="text-zinc-300">Pro</strong>, <strong className="text-zinc-300">Max</strong>, or <strong className="text-zinc-300">CLI</strong> subscription,
+                      you can use your subscription token instead of a pay-as-you-go API key.
+                      Run <code className="px-1 py-0.5 bg-zinc-800 rounded text-purple-300">claude setup-token</code> in your terminal
+                      and paste the generated token (<code className="text-zinc-500">sk-ant-oat01-...</code>) in the API Key field above.
+                      ForgeAI auto-detects the token type and uses the correct authentication.
+                    </p>
+                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-amber-300/90 leading-relaxed">
+                        <strong>Temporarily unavailable:</strong> Anthropic has disabled OAuth token authentication on their API.
+                        Use a standard API key from{' '}
+                        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer"
+                          className="underline text-amber-200 hover:text-white">console.anthropic.com</a>{' '}
+                        until they re-enable subscription-based access.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Models — toggle editor */}
                 <div className="pt-2 border-t border-zinc-800/50">
