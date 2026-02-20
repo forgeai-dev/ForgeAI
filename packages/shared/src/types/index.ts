@@ -5,3 +5,4 @@ export * from './channel.js';
 export * from './agent.js';
 export * from './gateway.js';
 export * from './voice.js';
+export * from './node-protocol.js';

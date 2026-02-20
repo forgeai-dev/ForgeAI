@@ -3,7 +3,7 @@ import { createLogger, generateId } from '@forgeai/shared';
 import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
-import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel } from '@forgeai/channels';
+import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
 import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault } from '@forgeai/security';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
@@ -55,6 +55,7 @@ let otelManager: OTelManager | null = null;
 let chatHistoryStore: ChatHistoryStore | null = null;
 let autopilotEngine: AutopilotEngine | null = null;
 let pairingManager: PairingManager | null = null;
+let nodeChannel: NodeChannel | null = null;
 
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
@@ -151,6 +152,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'STT_TTS_API_KEY',
       'WHISPER_API_URL',
       'PIPER_API_URL',
+      'KOKORO_API_URL',
+      'KOKORO_API_KEY',
+      'NODE_API_KEY',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -969,6 +973,176 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     logger.info('WhatsApp channel skipped (not configured — enable via Dashboard Channels page)');
   }
 
+  // ─── Node Protocol Channel ────────────────────────────
+  // Hot-reloadable: can be initialized/reinitialized when NODE_API_KEY changes via Dashboard
+
+  const initNodeChannel = (apiKey: string) => {
+    // Disconnect previous instance if any
+    if (nodeChannel) {
+      nodeChannel.disconnect().catch(() => {});
+      nodeChannel = null;
+      logger.info('Previous NodeChannel instance disconnected (hot-reload)');
+    }
+
+    nodeChannel = createNodeChannel({ apiKey, maxNodes: 100 });
+
+    // Wire Node inbound → AgentManager → response
+    nodeChannel.onMessage(async (inbound) => {
+      if (!agentManager) return;
+
+      const sessionId = `node-${inbound.senderId}`;
+      const nodeMeta = { channelType: 'node', userId: inbound.senderId };
+
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: `node-user-${Date.now()}`,
+        role: 'user',
+        content: inbound.content,
+        senderName: inbound.senderName || inbound.senderId,
+        timestamp: new Date().toISOString(),
+      }, nodeMeta);
+
+      const result = await agentManager.processMessage({
+        sessionId,
+        userId: inbound.senderId,
+        content: inbound.content,
+        channelType: 'node',
+      });
+
+      const nodeContent = result.content || '(No response)';
+
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: result.id,
+        role: 'assistant',
+        content: nodeContent,
+        model: result.model,
+        provider: result.provider,
+        duration: result.duration,
+        tokens: result.usage?.totalTokens,
+        steps: result.steps,
+        timestamp: new Date().toISOString(),
+      }, nodeMeta);
+
+      getWSBroadcaster().broadcastAll({
+        type: 'agent.done',
+        sessionId,
+        channelType: 'node',
+        timestamp: Date.now(),
+      });
+
+      await nodeChannel!.send({
+        channelType: 'node',
+        recipientId: inbound.senderId,
+        content: nodeContent,
+        replyToId: inbound.channelMessageId,
+      });
+    });
+
+    logger.info('Node Protocol channel initialized (hot-reloadable)');
+  };
+
+  // Initialize on startup if key exists
+  const nodeApiKey = process.env.NODE_API_KEY || '';
+  if (nodeApiKey) {
+    initNodeChannel(nodeApiKey);
+  } else {
+    logger.info('Node Protocol: waiting for NODE_API_KEY (configure via Dashboard → Settings)');
+  }
+
+  // WebSocket route — always registered, delegates to current nodeChannel
+  app.get('/ws/node', { websocket: true }, (socket, request) => {
+    if (!nodeChannel) {
+      socket.close(4003, 'Node Protocol not configured — set NODE_API_KEY in Dashboard');
+      return;
+    }
+    const ip = request.headers['x-forwarded-for'] || request.ip || 'unknown';
+    nodeChannel.handleConnection(socket as any, String(ip));
+  });
+
+  // ─── REST API: Nodes ────────────────────────────────
+
+  // GET /api/nodes — list connected nodes + channel status
+  app.get('/api/nodes', async () => {
+    return {
+      enabled: !!nodeChannel,
+      nodes: nodeChannel ? nodeChannel.getConnectedNodes() : [],
+      total: nodeChannel ? nodeChannel.getConnectedNodes().length : 0,
+    };
+  });
+
+  // POST /api/nodes/generate-key — generate a cryptographically secure API key
+  app.post('/api/nodes/generate-key', async () => {
+    const { randomBytes } = await import('node:crypto');
+    const key = `fnode_${randomBytes(24).toString('base64url')}`;
+
+    // Save to env + Vault
+    process.env.NODE_API_KEY = key;
+    if (vault?.isInitialized()) {
+      vault.set('env:NODE_API_KEY', key);
+    }
+
+    // Hot-reload NodeChannel with new key
+    initNodeChannel(key);
+
+    logger.info('Node Protocol key generated and saved to Vault');
+    return { success: true, key, persisted: vault?.isInitialized() ?? false };
+  });
+
+  // GET /api/nodes/connection-info — get connection instructions for node agents
+  app.get('/api/nodes/connection-info', async (request: FastifyRequest) => {
+    const hasKey = !!process.env.NODE_API_KEY;
+    const host = request.headers.host || `localhost:${process.env.GATEWAY_PORT || 18800}`;
+    const proto = request.headers['x-forwarded-proto'] || 'http';
+    const gatewayUrl = `${proto}://${host}`;
+    const wsUrl = `${proto === 'https' ? 'wss' : 'ws'}://${host}/ws/node`;
+
+    return {
+      enabled: hasKey,
+      gatewayUrl,
+      wsUrl,
+      key: hasKey ? '••••••••' : null,
+      keyPrefix: hasKey ? process.env.NODE_API_KEY!.substring(0, 10) + '...' : null,
+      example: hasKey
+        ? `./forgeai-node --gateway ${gatewayUrl} --token YOUR_KEY --name "My-Device"`
+        : 'Generate a key first via Dashboard → Settings',
+    };
+  });
+
+  // GET /api/nodes/:nodeId — get specific node info
+  app.get('/api/nodes/:nodeId', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!nodeChannel) { reply.status(503).send({ error: 'Node channel not initialized — set NODE_API_KEY in Dashboard' }); return; }
+    const { nodeId } = request.params as { nodeId: string };
+    const node = nodeChannel.getNode(nodeId);
+    if (!node) { reply.status(404).send({ error: `Node '${nodeId}' not found` }); return; }
+    return { node };
+  });
+
+  // POST /api/nodes/:nodeId/command — execute command on a node
+  app.post('/api/nodes/:nodeId/command', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!nodeChannel) { reply.status(503).send({ error: 'Node channel not initialized' }); return; }
+    const { nodeId } = request.params as { nodeId: string };
+    const { cmd, args, timeout } = request.body as { cmd: string; args?: string[]; timeout?: number };
+    if (!cmd) { reply.status(400).send({ error: 'cmd is required' }); return; }
+    try {
+      const result = await nodeChannel.sendCommand(nodeId, cmd, args, timeout);
+      return { success: true, result };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      reply.status(500).send({ error: msg });
+      return;
+    }
+  });
+
+  // POST /api/nodes/:nodeId/message — send a message to a node
+  app.post('/api/nodes/:nodeId/message', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!nodeChannel) { reply.status(503).send({ error: 'Node channel not initialized' }); return; }
+    const { nodeId } = request.params as { nodeId: string };
+    const { content } = request.body as { content: string };
+    if (!content) { reply.status(400).send({ error: 'content is required' }); return; }
+    const sent = nodeChannel.sendToNode(nodeId, { type: 'response', ts: Date.now(), content } as any);
+    if (!sent) { reply.status(404).send({ error: `Node '${nodeId}' not connected` }); return; }
+    return { success: true };
+  });
+
   // ─── REST API: Chat ────────────────────────────────
 
   // POST /api/chat — send a message and get a response
@@ -1646,6 +1820,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'stt-tts-api', display: 'VPS STT/TTS (Whisper+Piper)', envKey: 'STT_TTS_API_KEY', type: 'key' as const },
     { name: 'whisper-api-url', display: 'VPS Whisper URL', envKey: 'WHISPER_API_URL', type: 'url' as const },
     { name: 'piper-api-url', display: 'VPS Piper URL', envKey: 'PIPER_API_URL', type: 'url' as const },
+    { name: 'kokoro-api-url', display: 'Kokoro TTS URL', envKey: 'KOKORO_API_URL', type: 'url' as const },
+    { name: 'kokoro-api-key', display: 'Kokoro API Key', envKey: 'KOKORO_API_KEY', type: 'key' as const },
+    { name: 'node-api-key', display: 'Node Protocol Key', envKey: 'NODE_API_KEY', type: 'key' as const },
   ];
 
   // GET /api/services — list service configs status
@@ -1686,6 +1863,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       voiceEngine.setConfig({ enabled: trimmed === 'true' } as any);
     }
 
+    // Hot-reload NodeChannel when key is set/changed via Dashboard
+    if (meta.name === 'node-api-key' && trimmed) {
+      initNodeChannel(trimmed);
+      logger.info('NodeChannel hot-reloaded with new key from Dashboard');
+    }
+
     logger.info(`Service ${name} configured via API`, { name, persisted: vault?.isInitialized() ?? false });
     return { success: true, service: name, configured: true };
   });
@@ -1703,6 +1886,13 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     if (meta.name === 'voice-enabled' && voiceEngine) {
       voiceEngine.setConfig({ enabled: false } as any);
+    }
+
+    // Disconnect NodeChannel when key is removed
+    if (meta.name === 'node-api-key' && nodeChannel) {
+      nodeChannel.disconnect().catch(() => {});
+      nodeChannel = null;
+      logger.info('NodeChannel disconnected — key removed via Dashboard');
     }
 
     logger.info(`Service ${name} key removed`, { name });

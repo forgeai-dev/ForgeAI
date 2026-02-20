@@ -13,3 +13,5 @@ export { TeamsChannel, createTeamsChannel } from './teams.js';
 export type { TeamsConfig } from './teams.js';
 export { GoogleChatChannel, createGoogleChatChannel } from './googlechat.js';
 export type { GoogleChatConfig } from './googlechat.js';
+export { NodeChannel, createNodeChannel } from './node.js';
+export type { NodeChannelConfig } from './node.js';

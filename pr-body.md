@@ -1,6 +1,6 @@
 ## Description
 
-Add free local Whisper STT (Speech-to-Text) for Telegram/WhatsApp voice messages. No API key required — runs entirely on the user's machine using `@huggingface/transformers`. OpenAI Whisper API kept as premium alternative.
+Complete internationalization (i18n) system for the Dashboard, agent identity fix to prevent hallucination, TTS text sanitization, streaming TTS playback, and voice/language config persistence in Vault.
 
 ## Type of Change
 
@@ -13,51 +13,64 @@ Add free local Whisper STT (Speech-to-Text) for Telegram/WhatsApp voice messages
 
 ## Changes Made
 
-### 1. Local Whisper STT Adapter (Free, No API Key)
+### 1. Dashboard i18n System (9 languages)
 
-- **New `LocalWhisperSTTAdapter`** using `@huggingface/transformers` (whisper-tiny model, ~75MB)
-- **Auto-downloads model** on first voice message (cached locally after that)
-- **Cross-platform audio decoding** via `@ffmpeg-installer/ffmpeg` (OGG/Opus → PCM Float32 16kHz)
-- **No external dependencies** — ffmpeg binary bundled as npm package (Windows/Linux/macOS)
+- **New `i18n.ts`** — translation dictionaries for EN, PT-BR, ES, FR, DE, IT, JA, KO, ZH
+- **New `I18nProvider.tsx`** — React Context managing language state, loads from Vault API on mount
+- **Language selector** in Settings saves to Vault + localStorage, updates entire UI instantly
+- **Translated pages**: Layout (sidebar + footer), Settings, Chat, Overview — all hardcoded strings replaced with `t()` calls
 
-### 2. Auto-Select STT Provider
+### 2. Agent Identity Fix (Anti-Hallucination)
 
-- **No `OPENAI_API_KEY`** → uses local Whisper (free, zero cost)
-- **With `OPENAI_API_KEY`** → uses OpenAI Whisper API (faster, higher quality)
-- **New `whisper-local` STT provider** type added to shared types
-- **Configurable model** via `WHISPER_MODEL` env var (default: `onnx-community/whisper-tiny`)
+- **System prompt** now explicitly states: "You are ForgeAI, NOT Claude, NOT GPT, NOT Gemini"
+- **Anti-hallucination rule**: "Only describe capabilities you actually have based on the tools listed below"
+- **Applies to both** full prompt and lightweight local LLM prompt
 
-### 3. Voice Message Flow Fix (Telegram & WhatsApp)
+### 3. TTS Text Sanitization
 
-- **Removed `isEnabled()` gate** — STT now works whenever `voiceEngine` is initialized, regardless of Voice toggle
-- **Clear user feedback** — if STT fails, sends actionable error message instead of `[Voice message]`
-- **Separate error handling** for Telegram and WhatsApp channels
+- **New `sanitizeForTTS()`** method in VoiceEngine — strips markdown, emojis, tables, code blocks, HTML tags, etc.
+- **Auto-applied** in `speak()` before synthesis
 
-### 4. Build Configuration
+### 4. TTS Streaming Playback
 
-- **`pnpm-workspace.yaml`** updated: `@ffmpeg-installer/ffmpeg`, `onnxruntime-node`, `sharp` moved to `onlyBuiltDependencies` so native binaries are downloaded correctly
+- **Sentence-by-sentence** TTS in Chat — splits text into chunks, plays first chunk ASAP while fetching rest
+- **Sequential audio queue** for natural pacing
+
+### 5. Config Persistence in Vault
+
+- **Voice config** (TTS/STT provider, voice, speed) saved to Vault on change, restored on gateway restart
+- **Language setting** persisted via `PUT /api/settings/language` endpoint
 
 ---
 
-## Files Changed (6 files)
+## Files Changed (14 files)
 
 | File | Change |
 |:-----|:-------|
-| `packages/shared/src/types/voice.ts` | Add `whisper-local` to `STTProvider` type |
-| `packages/agent/src/voice-engine.ts` | New `LocalWhisperSTTAdapter`, auto-select logic, ffmpeg decoding |
-| `packages/agent/package.json` | Add `@huggingface/transformers`, `@ffmpeg-installer/ffmpeg` |
-| `packages/core/src/gateway/chat-routes.ts` | Fix voice message handling for Telegram/WhatsApp |
-| `pnpm-workspace.yaml` | Allow native build scripts for audio packages |
-| `pnpm-lock.yaml` | Updated lockfile |
+| `packages/dashboard/src/lib/i18n.ts` | **NEW** — Translation dictionaries + useI18n hook |
+| `packages/dashboard/src/components/I18nProvider.tsx` | **NEW** — React i18n context provider |
+| `packages/dashboard/src/App.tsx` | Wrap app with I18nProvider |
+| `packages/dashboard/src/components/Layout.tsx` | Use t() for nav labels + footer |
+| `packages/dashboard/src/pages/Settings.tsx` | Use t() for all section headers, labels, Claude subscription |
+| `packages/dashboard/src/pages/Chat.tsx` | Use t() for sidebar, input, status messages |
+| `packages/dashboard/src/pages/Overview.tsx` | Use t() for all stats, alerts, tables, sections |
+| `packages/agent/src/runtime.ts` | Fix system prompt identity + anti-hallucination |
+| `packages/agent/src/voice-engine.ts` | Add sanitizeForTTS(), integrate in speak() |
+| `packages/core/src/gateway/chat-routes.ts` | Voice config Vault persistence + language API endpoints |
+| `packages/shared/src/types/voice.ts` | VPS STT/TTS provider types |
+| `packages/channels/src/telegram.ts` | Telegram voice message handling |
+| `packages/agent/src/providers/ollama.ts` | Ollama provider updates |
+| `.env.example` | New env vars for VPS STT/TTS |
 
 ## How to Test
 
-1. `pnpm install` — downloads ffmpeg binary + transformers
-2. `pnpm -r build`
-3. `pnpm forge start --migrate`
-4. Send a voice message to the bot on Telegram
-5. Bot should transcribe the audio and respond to the content
-6. Check logs for `Local Whisper: model loaded` and `Voice transcribed (Telegram)`
+1. `pnpm -r build`
+2. `pnpm forge start --migrate`
+3. Open Dashboard → Settings → change language to Português (BR)
+4. Verify all pages (Overview, Chat, Settings) update instantly
+5. Refresh page — language persists
+6. Open Chat → ask "quem é você?" — agent should say "ForgeAI" (not Claude/GPT)
+7. Test voice mode in Chat — TTS should play clean audio without markdown artifacts
 
 ## Related Issue
 
@@ -70,6 +83,6 @@ N/A
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
-- [x] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+- [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Cross-platform support (Windows/Linux/macOS via @ffmpeg-installer)
+- [x] Documentation updated (if needed)

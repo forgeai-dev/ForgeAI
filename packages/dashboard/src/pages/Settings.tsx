@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { useI18n, type Lang } from '@/lib/i18n';
 
@@ -33,6 +33,9 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   'stt-tts-api': { placeholder: 'Enter API key for VPS STT/TTS...', desc: 'Whisper (STT) + Piper (TTS) on VPS - free, no OpenAI credits' },
   'whisper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Whisper API URL (optional, has default)' },
   'piper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Piper API URL (optional, has default)' },
+  'kokoro-api-url': { placeholder: 'http://167.86.85.73:8881', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
+  'kokoro-api-key': { placeholder: 'Enter Kokoro API key...', desc: 'Bearer token for Kokoro TTS auth (nginx proxy)' },
+  'node-api-key': { placeholder: 'Enter Node Protocol API key...', desc: 'Shared secret for IoT/embedded node agents (Raspberry Pi, ESP32, etc.)' },
 };
 
 export function SettingsPage() {
@@ -64,6 +67,12 @@ export function SettingsPage() {
   const [svcDeleting, setSvcDeleting] = useState<Record<string, boolean>>({});
   const [svcErrors, setSvcErrors] = useState<Record<string, string>>({});
 
+  // Node Protocol state
+  const [nodeGenerating, setNodeGenerating] = useState(false);
+  const [nodeGeneratedKey, setNodeGeneratedKey] = useState<string | null>(null);
+  const [nodeConnInfo, setNodeConnInfo] = useState<{ gatewayUrl?: string; wsUrl?: string; keyPrefix?: string; example?: string } | null>(null);
+  const [nodeCopied, setNodeCopied] = useState<string | null>(null);
+
   const loadProviders = useCallback(() => {
     api.getProviders().then(r => setProviders(r.providers)).catch(() => {});
   }, []);
@@ -73,6 +82,16 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => { loadProviders(); loadServices(); }, [loadProviders, loadServices]);
+
+  // Load node connection info when node is configured
+  const nodeConfigured = services.find(s => s.name === 'node-api-key')?.configured ?? false;
+  useEffect(() => {
+    if (nodeConfigured) {
+      fetch('/api/nodes/connection-info').then(r => r.json()).then(setNodeConnInfo).catch(() => {});
+    } else {
+      setNodeConnInfo(null);
+    }
+  }, [nodeConfigured]);
 
   const handleSvcSave = async (name: string) => {
     const val = svcKeys[name];
@@ -788,8 +807,10 @@ export function SettingsPage() {
 
             const whisperSvc = services.find(s => s.name === 'whisper-api-url');
             const piperSvc = services.find(s => s.name === 'piper-api-url');
+            const kokoroSvc = services.find(s => s.name === 'kokoro-api-url');
             const whisperMeta = SERVICE_META['whisper-api-url'];
             const piperMeta = SERVICE_META['piper-api-url'];
+            const kokoroMeta = SERVICE_META['kokoro-api-url'];
             return (
               <div className="p-5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -871,6 +892,50 @@ export function SettingsPage() {
                   {svcErrors['piper-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['piper-api-url']}</p>}
                 </div>
 
+                {/* Kokoro API URL */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Kokoro TTS URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={kokoroSvc?.configured ? 'Configured' : kokoroMeta.placeholder}
+                      value={svcKeys['kokoro-api-url'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'kokoro-api-url': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('kokoro-api-url')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Save Kokoro URL" onClick={() => handleSvcSave('kokoro-api-url')} disabled={svcSaving['kokoro-api-url'] || !(svcKeys['kokoro-api-url']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['kokoro-api-url'] ? 'bg-emerald-500' : svcSaving['kokoro-api-url'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['kokoro-api-url']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['kokoro-api-url'] ? <Check className="w-4 h-4" /> : svcSaving['kokoro-api-url'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['kokoro-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['kokoro-api-url']}</p>}
+                </div>
+
+                {/* Kokoro API Key */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Kokoro API Key</label>
+                  <div className="flex gap-2">
+                    <input
+                      type={svcShowKey['kokoro-api-key'] ? 'text' : 'password'}
+                      placeholder={services.find(s => s.name === 'kokoro-api-key')?.configured ? '••••••••' : SERVICE_META['kokoro-api-key'].placeholder}
+                      value={svcKeys['kokoro-api-key'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'kokoro-api-key': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('kokoro-api-key')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Toggle Kokoro key visibility" onClick={() => setSvcShowKey(k => ({ ...k, 'kokoro-api-key': !k['kokoro-api-key'] }))}
+                      className="px-2 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
+                      {svcShowKey['kokoro-api-key'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                    <button aria-label="Save Kokoro key" onClick={() => handleSvcSave('kokoro-api-key')} disabled={svcSaving['kokoro-api-key'] || !(svcKeys['kokoro-api-key']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['kokoro-api-key'] ? 'bg-emerald-500' : svcSaving['kokoro-api-key'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['kokoro-api-key']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['kokoro-api-key'] ? <Check className="w-4 h-4" /> : svcSaving['kokoro-api-key'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['kokoro-api-key'] && <p className="text-xs text-red-400 mt-1">{svcErrors['kokoro-api-key']}</p>}
+                </div>
+
                 <p className="text-[10px] text-zinc-500 flex items-center gap-1">
                   <Info className="w-3 h-3" /> Free STT/TTS on your VPS — no OpenAI credits needed
                 </p>
@@ -890,6 +955,232 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Node Protocol (IoT/Embedded) */}
+      {(() => {
+        const nodeKeyVisible = svcShowKey['node-api-key'] ?? false;
+        const nodeIsSaving = svcSaving['node-api-key'] ?? false;
+        const nodeIsSaved = svcSaved['node-api-key'] ?? false;
+
+        const handleGenerateKey = async () => {
+          setNodeGenerating(true);
+          try {
+            const res = await fetch('/api/nodes/generate-key', { method: 'POST' });
+            const data = await res.json() as { success: boolean; key: string };
+            if (data.success) {
+              setNodeGeneratedKey(data.key);
+              loadServices();
+            }
+          } catch { /* ignore */ }
+          setNodeGenerating(false);
+        };
+
+        const copyToClipboard = (text: string, label: string) => {
+          navigator.clipboard.writeText(text);
+          setNodeCopied(label);
+          setTimeout(() => setNodeCopied(null), 2000);
+        };
+
+        return (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Wifi className="w-5 h-5 text-forge-400" />
+                Node Protocol (IoT/Embedded)
+              </h2>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${nodeConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+                {nodeConfigured ? 'Active' : 'Not configured'}
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800">
+              {/* Generate or manual key */}
+              <div className="p-5 space-y-3">
+                <div>
+                  <span className="font-medium text-white">API Key</span>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">
+                    Shared secret for IoT/embedded node agents (Raspberry Pi, ESP32, NanoKVM). Stored encrypted in Vault (AES-256-GCM).
+                  </p>
+                </div>
+
+                {/* Generate Key button */}
+                {!nodeConfigured && !nodeGeneratedKey && (
+                  <button
+                    onClick={handleGenerateKey}
+                    disabled={nodeGenerating}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-forge-500 hover:bg-forge-600 text-white text-sm font-medium transition-all disabled:opacity-50"
+                  >
+                    {nodeGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {nodeGenerating ? 'Generating...' : 'Generate Secure Key'}
+                  </button>
+                )}
+
+                {/* Show generated key (one-time display) */}
+                {nodeGeneratedKey && (
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div className="text-[11px] text-amber-300/90 leading-relaxed">
+                        <strong>Copy this key now!</strong> It will not be shown again after you leave this page.
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-emerald-400 font-mono break-all select-all">
+                        {nodeGeneratedKey}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(nodeGeneratedKey, 'key')}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${nodeCopied === 'key' ? 'bg-emerald-500 text-white' : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300'}`}
+                      >
+                        {nodeCopied === 'key' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual key input (or change existing) */}
+                {(nodeConfigured || nodeGeneratedKey) && (
+                  <div className="pt-2">
+                    <label className="text-xs text-zinc-400 mb-1 block">{nodeConfigured ? 'Change key' : 'Or enter manually'}</label>
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type={nodeKeyVisible ? 'text' : 'password'}
+                          placeholder={nodeConfigured ? '••••••••••••' : 'fnode_...'}
+                          value={svcKeys['node-api-key'] ?? ''}
+                          onChange={e => setSvcKeys(k => ({ ...k, 'node-api-key': e.target.value }))}
+                          onKeyDown={e => e.key === 'Enter' && handleSvcSave('node-api-key')}
+                          className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                        />
+                        <button
+                          aria-label="Toggle visibility"
+                          onClick={() => setSvcShowKey(s => ({ ...s, 'node-api-key': !nodeKeyVisible }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                        >
+                          {nodeKeyVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                      <button
+                        aria-label="Save node key"
+                        onClick={() => handleSvcSave('node-api-key')}
+                        disabled={nodeIsSaving || !(svcKeys['node-api-key']?.trim())}
+                        className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${nodeIsSaved ? 'bg-emerald-500' : nodeIsSaving ? 'bg-forge-500/50 cursor-wait' : svcKeys['node-api-key']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}
+                      >
+                        {nodeIsSaved ? <Check className="w-4 h-4" /> : nodeIsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      </button>
+                      {nodeConfigured && (
+                        <>
+                          <button
+                            aria-label="Regenerate key"
+                            onClick={handleGenerateKey}
+                            disabled={nodeGenerating}
+                            className="px-3 py-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-600 border border-zinc-700 text-xs font-medium transition-all"
+                          >
+                            {nodeGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          </button>
+                          <button
+                            aria-label="Remove node key"
+                            onClick={() => handleSvcRemove('node-api-key')}
+                            disabled={svcDeleting['node-api-key']}
+                            className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all"
+                          >
+                            {svcDeleting['node-api-key'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {svcErrors['node-api-key'] && <p className="text-[11px] text-red-400 mt-1">{svcErrors['node-api-key']}</p>}
+                    <p className="text-[10px] text-zinc-500 mt-1">Encrypted in Vault — persists across restarts. No .env file needed.</p>
+                  </div>
+                )}
+
+                {/* Not configured — manual input fallback */}
+                {!nodeConfigured && !nodeGeneratedKey && (
+                  <div className="pt-2 border-t border-zinc-800/50">
+                    <label className="text-xs text-zinc-400 mb-1 block">Or enter your own key</label>
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <input
+                          type={nodeKeyVisible ? 'text' : 'password'}
+                          placeholder="Enter custom key..."
+                          value={svcKeys['node-api-key'] ?? ''}
+                          onChange={e => setSvcKeys(k => ({ ...k, 'node-api-key': e.target.value }))}
+                          onKeyDown={e => e.key === 'Enter' && handleSvcSave('node-api-key')}
+                          className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                        />
+                        <button
+                          aria-label="Toggle visibility"
+                          onClick={() => setSvcShowKey(s => ({ ...s, 'node-api-key': !nodeKeyVisible }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                        >
+                          {nodeKeyVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                      <button
+                        aria-label="Save node key"
+                        onClick={() => handleSvcSave('node-api-key')}
+                        disabled={nodeIsSaving || !(svcKeys['node-api-key']?.trim())}
+                        className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${nodeIsSaved ? 'bg-emerald-500' : nodeIsSaving ? 'bg-forge-500/50 cursor-wait' : svcKeys['node-api-key']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}
+                      >
+                        {nodeIsSaved ? <Check className="w-4 h-4" /> : nodeIsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Connection instructions (shown when configured) */}
+              {nodeConfigured && nodeConnInfo && (
+                <div className="p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-forge-400" />
+                    <span className="font-medium text-white text-sm">Connection Instructions</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">WebSocket URL</span>
+                      <div className="flex items-center gap-1.5">
+                        <code className="text-zinc-200 font-mono">{nodeConnInfo.wsUrl}</code>
+                        <button onClick={() => copyToClipboard(nodeConnInfo.wsUrl || '', 'ws')}
+                          className={`p-0.5 rounded ${nodeCopied === 'ws' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                          {nodeCopied === 'ws' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400">Key prefix</span>
+                      <code className="text-zinc-300 font-mono">{nodeConnInfo.keyPrefix}</code>
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <p className="text-[11px] text-zinc-400 mb-1.5">Run on your device:</p>
+                    <div className="relative">
+                      <pre className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-[11px] text-zinc-300 font-mono overflow-x-auto whitespace-pre-wrap">
+{`./forgeai-node \\
+  --gateway ${nodeConnInfo.gatewayUrl} \\
+  --token YOUR_KEY \\
+  --name "My-RaspberryPi"`}
+                      </pre>
+                      <button
+                        onClick={() => copyToClipboard(`./forgeai-node --gateway ${nodeConnInfo.gatewayUrl} --token YOUR_KEY --name "My-Device"`, 'cmd')}
+                        className={`absolute top-2 right-2 p-1 rounded ${nodeCopied === 'cmd' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        {nodeCopied === 'cmd' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-500">
+                    Supports: Raspberry Pi 2-5, ESP32, NanoKVM, any Linux ARM/AMD64 device. Binary ~5MB, zero dependencies.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* Database */}
       <section className="space-y-4">

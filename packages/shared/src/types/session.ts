@@ -44,6 +44,7 @@ export type ChannelType =
   | 'teams'
   | 'googlechat'
   | 'matrix'
+  | 'node'
   | 'webchat'
   | 'rest-api'
   | 'email'

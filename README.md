@@ -14,7 +14,7 @@
 
 <br />
 
-| 7 Channels | 10 LLM Providers | 13 Tools | 17 Dashboard Pages | 140+ API Endpoints | 7 Security Modules |
+| 8 Channels | 10 LLM Providers | 13 Tools | 17 Dashboard Pages | 150+ API Endpoints | 7 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
@@ -33,7 +33,7 @@
 
 ## What is ForgeAI?
 
-ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, and a built-in WebChat — all managed through a modern 17-page dashboard.
+ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and **IoT/embedded devices** via the Node Protocol — all managed through a modern 17-page dashboard.
 
 Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 7 security modules before reaching the agent.
 
@@ -47,6 +47,7 @@ Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 13
   Teams                                                       Shell commands
   Google Chat                                                  Schedule tasks
   WebChat                                                      Agent-to-Agent
+  Node Protocol                                                IoT devices
 ```
 
 ---
@@ -61,7 +62,7 @@ Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 13
 7 security modules active by default. AES-256-GCM encrypted vault, RBAC, rate limiting, prompt injection detection, input sanitization, 2FA, and immutable audit logging. Your API keys and tokens are **never** stored in plain text.
 
 ### 🌐 True Multi-Channel
-One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, and WebChat. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
+One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
 
 ### 🤖 Autonomous Agent
 The agentic loop runs up to **25 iterations** per request. The agent browses the web, executes code, manages files, takes screenshots, schedules tasks, and communicates with other agents — all without human intervention.
@@ -109,7 +110,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 
 ## 🎯 Features at a Glance
 
-### Messaging Channels (7)
+### Messaging Channels (8)
 
 | Channel | Library | Highlights |
 |:--------|:--------|:-----------|
@@ -120,6 +121,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **Microsoft Teams** | Bot Framework | Webhook-based, conversation references, adaptive cards |
 | **Google Chat** | Chat API | Webhook + async REST, service account JWT, space routing |
 | **WebChat** | Built-in | Browser-based, real-time execution steps, session persistence |
+| **Node Protocol** | Go agent (~5MB) | WebSocket, IoT/embedded devices, Raspberry Pi, ESP32, NanoKVM, node-to-node relay |
 
 ### LLM Providers (10) with Automatic Failover
 
@@ -341,7 +343,7 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          MESSAGING CHANNELS                              │
 │   WhatsApp  ·  Telegram  ·  Discord  ·  Slack  ·  Teams  ·  Google Chat │
-│                           ·  WebChat  ·                                  │
+│                   ·  WebChat  ·  Node Protocol (IoT)  ·                  │
 └─────────────────────────────────┬───────────────────────────────────────┘
                                   │ messages
                     ┌─────────────▼─────────────┐
@@ -388,20 +390,21 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
                     └─────────────────────────────────────────────┘
 ```
 
-### 11-Package Monorepo
+### 12-Package Monorepo
 
 ```
 packages/
 ├── shared/      →  Types, utils, constants, logger
 ├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Sanitizer, IP Filter
 ├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), UsageTracker, Agentic Loop
-├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
+├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol
 ├── tools/       →  Tool Registry, 13 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
 ├── plugins/     →  Plugin Manager, Plugin SDK, AutoResponder, ContentFilter, ChatCommands
 ├── workflows/   →  Workflow Engine, step runner, dependency graph, parallel execution
 ├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing
 ├── cli/         →  CLI commands: start, doctor, status, onboard
-└── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
+├── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
+└── node-agent/  →  Lightweight Go binary (~5MB) for IoT/embedded devices (Raspberry Pi, ESP32)
 ```
 
 ---
@@ -420,6 +423,7 @@ ForgeAI exposes **140+ REST API endpoints**. Full list available at `GET /info`.
 | **Plugins** | 8 | `GET /api/plugins` · `GET /api/plugins/store` · `POST /api/plugins/store/template` |
 | **Workflows** | 5 | `POST /api/workflows` · `POST /api/workflows/:id/run` · `GET /api/workflows/runs` |
 | **Channels** | 6 | `GET /api/channels/status` · `POST /api/channels/:type/configure` · `POST /api/pairing/generate` |
+| **Nodes** | 6 | `GET /api/nodes` · `GET /api/nodes/:id` · `POST /api/nodes/:id/command` · `POST /api/nodes/generate-key` · `GET /api/nodes/connection-info` |
 | **MCP** | 7 | `GET /api/mcp/servers` · `POST /api/mcp/servers` · `POST /api/mcp/tools/call` |
 | **Memory** | 5 | `POST /api/memory/store` · `POST /api/memory/search` · `POST /api/memory/consolidate` |
 | **RAG** | 6 | `POST /api/rag/ingest` · `POST /api/rag/search` · `GET /api/rag/documents` |
@@ -565,13 +569,14 @@ All core features are implemented and tested:
 
 - **Security** — 7 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, audit
 - **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (25 iter), thinking levels, failover + circuit breaker
-- **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
+- **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol (IoT)
 - **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
 - **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
+- **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, ESP32, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
 - **Configurable Models** — All 10 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
@@ -586,7 +591,7 @@ All core features are implemented and tested:
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |
 | Voice wake word detection | Low |
-| IoT device node protocol (WebSocket) | Medium |
+| ~~IoT device node protocol (WebSocket)~~ | ✅ Done |
 | ELK/Loki log aggregation | Medium |
 
 See **[ROADMAP.md](./ROADMAP.md)** for the full development history.
@@ -617,10 +622,10 @@ pnpm test    # 38 E2E tests
 | **Encryption** | AES-256-GCM, PBKDF2 (310k iter), bcrypt, HMAC-SHA256 |
 | **Auth** | JWT (access + refresh + rotation) + TOTP 2FA |
 | **Dashboard** | React 19, Vite 6, TailwindCSS 4, Lucide Icons |
-| **Channels** | grammY, discord.js, Baileys, Bolt SDK, Bot Framework |
+| **Channels** | grammY, discord.js, Baileys, Bolt SDK, Bot Framework, Go WebSocket (Node Protocol) |
 | **Browser** | Puppeteer (headless Chromium) |
-| **Build** | tsup, pnpm workspaces (11 packages) |
-| **Test** | Vitest, 53 E2E API tests |
+| **Build** | tsup, pnpm workspaces (12 packages) |
+| **Test** | Vitest, 53+ E2E API tests |
 | **CI/CD** | GitHub Actions (build → test → deploy) |
 | **Deploy** | Docker multi-stage, docker-compose |
 | **Observability** | OpenTelemetry (OTLP/HTTP), structured JSON logging |
