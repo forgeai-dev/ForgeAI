@@ -349,7 +349,11 @@ Connect lightweight devices to your AI via WebSocket. A single Go binary (~5MB, 
 | **macOS (Intel)** | AMD64 | `forgeai-node-darwin-amd64` | ✅ Full support |
 | **macOS (Apple Silicon)** | ARM64 | `forgeai-node-darwin-arm64` | ✅ Full support |
 
-> **Note:** ESP32, Arduino, and STM32 are **not supported** — the Go binary requires a full Linux/Windows/macOS operating system. A future C/Rust micro-agent is planned for bare-metal MCUs.
+| **ESP32 (all variants)** | Xtensa / RISC-V | MicroPython agent | ✅ Full support |
+| **ESP32-CAM** | Xtensa | MicroPython agent | ✅ Camera support |
+| **ESP8266** | Xtensa | MicroPython agent | ⚠️ Limited (less RAM) |
+
+> **Note:** ESP32 uses a separate **MicroPython agent** (`packages/node-agent-esp32/`), not the Go binary. Arduino and STM32 bare-metal boards are not yet supported.
 
 </details>
 
@@ -535,7 +539,7 @@ API endpoints:
                     └─────────────────────────────────────────────┘
 ```
 
-### 12-Package Monorepo
+### 13-Package Monorepo
 
 ```
 packages/
@@ -549,7 +553,8 @@ packages/
 ├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing
 ├── cli/         →  CLI commands: start, doctor, status, onboard
 ├── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
-└── node-agent/  →  Lightweight Go binary (~5MB) for IoT/embedded devices (Raspberry Pi, Jetson, BeagleBone)
+├── node-agent/       →  Go binary (~5MB) for Linux SBCs (Raspberry Pi, Jetson, BeagleBone)
+└── node-agent-esp32/ →  MicroPython agent for ESP32 microcontrollers (WiFi, GPIO, sensors)
 ```
 
 ---

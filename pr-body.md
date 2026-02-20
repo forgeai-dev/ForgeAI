@@ -1,6 +1,6 @@
 ## Description
 
-Add a dedicated Node Protocol section to the README with supported devices table, quick setup guide, architecture diagram, auto-detected capabilities, and key management info. Fix incorrect ESP32 references across the entire codebase — ESP32 is not supported by the Go binary (requires full Linux/Windows/macOS OS).
+Add ESP32 MicroPython agent for the Node Protocol — the same WebSocket protocol as the Go agent but running on ESP32 microcontrollers via MicroPython. Includes WiFi auto-connect, GPIO control, sensor reading (DHT11/22), ADC, PWM, remote command execution, and 15+ built-in commands.
 
 ## Type of Change
 
@@ -13,23 +13,22 @@ Add a dedicated Node Protocol section to the README with supported devices table
 
 ## Changes Made
 
-- **README.md**: New "Node Protocol (IoT/Embedded Devices)" section with:
-  - Supported Devices table (14 devices with architecture and binary info)
-  - Quick Setup guide for Raspberry Pi (download, run, systemd service)
-  - Auto-Detected Capabilities table (shell, system, gpio, camera, docker, network)
-  - Architecture diagram (Device → NodeChannel → AgentManager → LLM)
-  - Key Management documentation (Dashboard, Vault, hot-reload, API endpoints)
-  - Note clarifying ESP32/Arduino/STM32 are not supported (future C/Rust micro-agent)
-- **README.md**: Fixed ESP32 mentions in channels table, monorepo structure, roadmap section
-- **ROADMAP.md**: Replaced ESP32 with supported devices (Jetson, BeagleBone, Orange Pi) in diagrams and cost tables
-- **Settings.tsx**: Fixed ESP32 mentions in Dashboard UI descriptions
-- **node-protocol.ts**: Fixed ESP32 mention in shared types platform comment
+- **New package `packages/node-agent-esp32/`** with 3 MicroPython files:
+  - `config.py` — WiFi, Gateway, token, intervals, GPIO pin config
+  - `boot.py` — WiFi auto-connect on startup with timeout
+  - `main.py` — Full agent: WebSocket client, auth, heartbeat, sysinfo, 15+ commands
+- **15 built-in commands**: reboot, mem, freq, gpio_read, gpio_write, led, pwm, adc_read, temp, dht, scan_wifi, ls, cat, exec, help
+- **Auto-detect capabilities**: gpio (always), sensor (DHT lib), camera (ESP32-CAM), bluetooth, neopixel
+- **System info**: memory (free/alloc), filesystem, CPU freq, internal temp, uptime, IP
+- **README.md** for ESP32 agent: supported boards, flashing instructions, Thonny/mpremote upload, wiring examples (DHT22, relay), troubleshooting
+- **Main README.md** updated: ESP32 added to supported devices table (3 entries), monorepo now 13 packages
 
 ## How to Test
 
-1. `pnpm -r build` — all packages build cleanly
-2. Review README Node Protocol section renders correctly on GitHub
-3. Verify no remaining ESP32 references in code (`grep -r ESP32`)
+1. `pnpm -r build` — existing TS packages still build fine
+2. Flash MicroPython on ESP32, upload the 3 .py files
+3. Monitor serial output — should see WiFi connect + Gateway auth
+4. Send commands via Dashboard: `POST /api/nodes/:id/command` with `{"cmd": "mem"}`
 
 ## Related Issue
 
@@ -53,8 +52,8 @@ N/A
 
 | File | Change |
 |:-----|:-------|
-| `README.md` | New Node Protocol section + ESP32 fixes |
-| `ROADMAP.md` | Replace ESP32 with supported devices in diagrams |
-| `packages/dashboard/src/pages/Settings.tsx` | Fix device names in UI descriptions |
-| `packages/shared/src/types/node-protocol.ts` | Fix platform comment |
-| `pr-body.md` | PR template for this change |
+| `packages/node-agent-esp32/config.py` | **NEW** — WiFi/Gateway/Node configuration |
+| `packages/node-agent-esp32/boot.py` | **NEW** — WiFi auto-connect on boot |
+| `packages/node-agent-esp32/main.py` | **NEW** — Full MicroPython agent (~400 lines) |
+| `packages/node-agent-esp32/README.md` | **NEW** — Setup guide, commands, wiring examples |
+| `README.md` | ESP32 in devices table, 13-package monorepo |
