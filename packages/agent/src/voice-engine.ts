@@ -150,7 +150,7 @@ class PiperTTSAdapter implements TTSAdapter {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: request.text }),
+      body: JSON.stringify({ text: request.text, voice: request.voice ?? 'faber' }),
     });
 
     if (!res.ok) throw new Error(`Piper TTS error: ${res.status} ${await res.text()}`);
@@ -165,9 +165,29 @@ class PiperTTSAdapter implements TTSAdapter {
     };
   }
 
-  async listVoices() {
+  async listVoices(): Promise<{ id: string; name: string; language: string }[]> {
+    const { baseUrl, apiKey } = this.getConfig();
+    try {
+      const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey}` };
+      const res = await fetch(`${baseUrl}/voices`, { headers });
+      if (!res.ok) return this.defaultVoices();
+      const data = await res.json() as { voices: { id: string; name: string; language: string; quality?: string }[] };
+      return data.voices.map(v => ({
+        id: v.id,
+        name: v.quality ? `${v.name} [${v.quality}]` : v.name,
+        language: v.language,
+      }));
+    } catch {
+      return this.defaultVoices();
+    }
+  }
+
+  private defaultVoices() {
     return [
-      { id: 'faber', name: 'Faber (PT-BR)', language: 'pt-BR' },
+      { id: 'faber', name: 'Faber (PT-BR) [medium]', language: 'pt-BR' },
+      { id: 'cadu', name: 'Cadu (PT-BR) [medium]', language: 'pt-BR' },
+      { id: 'edresson', name: 'Edresson (PT-BR) [low]', language: 'pt-BR' },
+      { id: 'jeff', name: 'Jeff (PT-BR) [medium]', language: 'pt-BR' },
     ];
   }
 }
