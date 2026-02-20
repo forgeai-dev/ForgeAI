@@ -740,7 +740,7 @@ All core features are implemented and tested:
 | Electron desktop app | Medium |
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |
-| Voice wake word detection | Low |
+| ~~Voice wake word detection (Porcupine/Picovoice)~~ | ✅ Done |
 | ~~IoT device node protocol (WebSocket)~~ | ✅ Done |
 | ELK/Loki log aggregation | Medium |
 

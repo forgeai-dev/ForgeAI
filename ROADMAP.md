@@ -87,12 +87,12 @@
 
 > ✅ **Já implementados:** Tailscale remote access (Fase 12), E2E Tests 38 Vitest (Fase 12-14), CI/CD GitHub Actions (Fase 13), OpenTelemetry (Fase 22)
 
-### 🔴 Apps Nativas (3 restantes)
+### 🔴 Apps Nativas (2 restantes)
 | Feature | Descrição | Complexidade |
 |---------|-----------|-------------|
 | Electron app | Desktop wrapper do Dashboard (Windows/Mac/Linux) | Média |
 | React Native / Expo | App mobile com chat + notificações push | Alta |
-| Voice Wake Word | Porcupine/Picovoice para ativação por voz "Hey Forge" | Média |
+| ~~Voice Wake Word~~ | ~~Porcupine/Picovoice para ativação por voz "Hey Forge"~~ | ✅ Done |
 
 > ✅ **Já implementados:** PWA (Fase 12) — manifest.json + service worker
 
