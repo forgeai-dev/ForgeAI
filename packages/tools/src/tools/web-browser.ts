@@ -7,6 +7,15 @@ const BLOCKED_DOMAINS: string[] = [];
 
 const MAX_CONTENT_LENGTH = 100_000;
 
+const BROWSER_USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+];
+
+const randomUA = () => BROWSER_USER_AGENTS[Math.floor(Math.random() * BROWSER_USER_AGENTS.length)];
+
 export class WebBrowserTool extends BaseTool {
   readonly definition: ToolDefinition = {
     name: 'web_browse',
@@ -54,30 +63,54 @@ export class WebBrowserTool extends BaseTool {
     }
 
     const { result, duration } = await this.timed(async () => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15_000);
+      const fetchHeaders: Record<string, string> = {
+        'User-Agent': randomUA(),
+        'Accept': extract === 'json' ? 'application/json' : 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        ...customHeaders,
+      };
 
-      try {
-        const fetchHeaders: Record<string, string> = {
-          'User-Agent': 'ForgeAI/0.1 (Web Browser Tool)',
-          'Accept': extract === 'json' ? 'application/json' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          ...customHeaders,
-        };
+      if (body && !fetchHeaders['Content-Type']) {
+        fetchHeaders['Content-Type'] = 'application/json';
+      }
 
-        if (body && !fetchHeaders['Content-Type']) {
-          fetchHeaders['Content-Type'] = 'application/json';
-        }
+      // Retry logic: up to 2 retries with backoff
+      const MAX_RETRIES = 2;
+      let lastError: Error | null = null;
 
-        const response = await fetch(url, {
-          method,
-          signal: controller.signal,
-          headers: fetchHeaders,
-          body: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined,
-        });
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25_000);
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+        try {
+          if (attempt > 0) {
+            // Rotate User-Agent on retry
+            fetchHeaders['User-Agent'] = randomUA();
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+            this.logger.debug('Retrying web browse', { url, attempt });
+          }
+
+          const response = await fetch(url, {
+            method,
+            signal: controller.signal,
+            headers: fetchHeaders,
+            body: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined,
+            redirect: 'follow',
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          // Success — process response below
+          // (the rest of the original code continues from here)
 
         // JSON extraction — return parsed JSON directly
         if (extract === 'json') {
@@ -186,9 +219,17 @@ export class WebBrowserTool extends BaseTool {
             };
           }
         }
-      } finally {
-        clearTimeout(timeout);
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          clearTimeout(timeout);
+          if (attempt < MAX_RETRIES) continue;
+          throw lastError;
+        } finally {
+          clearTimeout(timeout);
+        }
       }
+      // Should never reach here, but just in case
+      throw lastError ?? new Error('Unexpected error');
     });
 
     this.logger.debug('Web browse completed', { url, extract, duration });

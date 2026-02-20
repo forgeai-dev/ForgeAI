@@ -11,6 +11,8 @@ const BLOCKED_DOMAINS: string[] = [];
 const SCREENSHOT_DIR = resolve(process.cwd(), '.forgeai', 'screenshots');
 const MAX_NAV_TIMEOUT = 30_000;
 
+const STEALTH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 export class PuppeteerBrowserTool extends BaseTool {
   private browser: Browser | null = null;
 
@@ -39,7 +41,7 @@ export class PuppeteerBrowserTool extends BaseTool {
     if (!this.browser || !this.browser.connected) {
       try {
         this.browser = await puppeteer.launch({
-          headless: true,
+          headless: 'shell',
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -47,6 +49,9 @@ export class PuppeteerBrowserTool extends BaseTool {
             '--disable-gpu',
             '--no-first-run',
             '--no-zygote',
+            '--disable-blink-features=AutomationControlled',
+            `--user-agent=${STEALTH_UA}`,
+            '--lang=pt-BR,pt,en-US,en',
           ],
         });
       } catch (err: unknown) {
@@ -62,6 +67,23 @@ export class PuppeteerBrowserTool extends BaseTool {
 
     const pages = await this.browser.pages();
     const page = pages.length > 0 ? pages[0] : await this.browser.newPage();
+
+    // Stealth: override navigator.webdriver and other bot signals
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      // @ts-ignore
+      window.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+      Object.defineProperty(navigator, 'permissions', {
+        get: () => ({ query: (_p: any) => Promise.resolve({ state: 'granted', onchange: null }) }),
+      });
+    });
+
+    await page.setUserAgent(STEALTH_UA);
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    });
     await page.setViewport({ width: 1280, height: 720 });
     return { browser: this.browser, page };
   }
@@ -153,7 +175,26 @@ export class PuppeteerBrowserTool extends BaseTool {
 
     const waitFor = params['waitFor'] as string | undefined;
 
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: MAX_NAV_TIMEOUT });
+    // Retry navigation up to 2 times (HTTP2 errors, timeouts, etc.)
+    const MAX_RETRIES = 2;
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          this.logger.debug('Retrying navigation', { url, attempt });
+          await new Promise(r => setTimeout(r, 1500 * attempt));
+        }
+        await page.goto(url, {
+          waitUntil: attempt > 0 ? 'domcontentloaded' : 'networkidle2',
+          timeout: MAX_NAV_TIMEOUT,
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt >= MAX_RETRIES) throw lastError;
+      }
+    }
 
     if (waitFor) {
       await page.waitForSelector(waitFor, { timeout: 10_000 });
