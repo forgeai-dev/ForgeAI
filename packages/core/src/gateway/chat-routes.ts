@@ -8,7 +8,7 @@ import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, typ
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault } from '@forgeai/security';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
-import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner } from '@forgeai/agent';
+import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
@@ -56,6 +56,7 @@ let chatHistoryStore: ChatHistoryStore | null = null;
 let autopilotEngine: AutopilotEngine | null = null;
 let pairingManager: PairingManager | null = null;
 let nodeChannel: NodeChannel | null = null;
+let wakeWordManager: WakeWordManager | null = null;
 
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
@@ -1823,6 +1824,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'kokoro-api-url', display: 'Kokoro TTS URL', envKey: 'KOKORO_API_URL', type: 'url' as const },
     { name: 'kokoro-api-key', display: 'Kokoro API Key', envKey: 'KOKORO_API_KEY', type: 'key' as const },
     { name: 'node-api-key', display: 'Node Protocol Key', envKey: 'NODE_API_KEY', type: 'key' as const },
+    { name: 'picovoice-key', display: 'Picovoice (Wake Word)', envKey: 'PICOVOICE_ACCESS_KEY', type: 'key' as const },
   ];
 
   // GET /api/services — list service configs status
@@ -2457,6 +2459,165 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     logger.info('Voice config updated', body);
     return { config: voiceEngine.getConfig() };
+  });
+
+  // ─── Wake Word Detection ──────────────────────────
+
+  wakeWordManager = createWakeWordManager({
+    enabled: false,
+    accessKey: process.env.PICOVOICE_ACCESS_KEY,
+    keyword: process.env.WAKE_WORD_KEYWORD ?? 'hey_forge',
+    sensitivity: parseFloat(process.env.WAKE_WORD_SENSITIVITY ?? '0.5'),
+  });
+
+  // Restore wake word config from Vault
+  if (vault?.isInitialized()) {
+    try {
+      const savedWakeConfig = vault.get('config:wakeword');
+      if (savedWakeConfig) {
+        const parsed = JSON.parse(savedWakeConfig);
+        wakeWordManager.setConfig(parsed);
+        logger.info('Wake word config restored from Vault', { keyword: parsed.keyword });
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Wire wake word events to WebSocket broadcaster and STT pipeline
+  wakeWordManager.onEvent(async (event: { type: string; timestamp: string; keyword?: string; transcript?: string; confidence?: number; error?: string }) => {
+    const broadcaster = getWSBroadcaster();
+    if (broadcaster) {
+      broadcaster.broadcastAll({ type: 'wake_word', event });
+    }
+
+    // When command audio is captured, transcribe it and send to agent
+    if (event.type === 'command_captured' && wakeWordManager?.getConfig().autoSendToAgent) {
+      const capturedAudio = wakeWordManager.consumeCapturedAudio();
+      if (capturedAudio && voiceEngine?.isEnabled() && agentManager) {
+        try {
+          const sttResult = await voiceEngine.listen(capturedAudio, { format: 'wav' });
+          logger.info('Wake word command transcribed', { text: sttResult.text });
+
+          const sessionId = wakeWordManager.getConfig().sessionId ?? generateId('wake');
+          const result = await agentManager.processMessage({
+            sessionId,
+            userId: 'wake-word-user',
+            content: sttResult.text,
+            channelType: 'voice',
+          });
+
+          // Broadcast the response
+          if (broadcaster) {
+            broadcaster.broadcastAll({
+              type: 'wake_word_response',
+              transcript: sttResult.text,
+              response: result.content,
+              sessionId,
+            });
+          }
+
+          // Optional TTS playback
+          if (voiceEngine.isEnabled()) {
+            try {
+              const ttsResult = await voiceEngine.speak(result.content.substring(0, 4000));
+              if (broadcaster) {
+                broadcaster.broadcastAll({
+                  type: 'wake_word_tts',
+                  audio: ttsResult.audio.toString('base64'),
+                  format: ttsResult.format,
+                });
+              }
+            } catch (ttsErr) {
+              logger.error('Wake word TTS failed', ttsErr);
+            }
+          }
+        } catch (err) {
+          logger.error('Wake word command processing failed', err);
+        }
+      }
+    }
+  });
+
+  // GET /api/wakeword/status — get wake word detection status
+  app.get('/api/wakeword/status', async () => {
+    if (!wakeWordManager) return { error: 'Wake word not initialized' };
+    return { status: wakeWordManager.getStatus() };
+  });
+
+  // GET /api/wakeword/config — get wake word configuration
+  app.get('/api/wakeword/config', async () => {
+    if (!wakeWordManager) return { error: 'Wake word not initialized' };
+    const config = wakeWordManager.getConfig();
+    return {
+      config: { ...config, accessKey: config.accessKey ? '***' : undefined },
+    };
+  });
+
+  // PUT /api/wakeword/config — update wake word configuration
+  app.put('/api/wakeword/config', async (request: FastifyRequest) => {
+    if (!wakeWordManager) return { error: 'Wake word not initialized' };
+    const body = request.body as {
+      enabled?: boolean;
+      engine?: string;
+      accessKey?: string;
+      keyword?: string;
+      sensitivity?: number;
+      listenDurationSec?: number;
+      confirmationSound?: boolean;
+      autoSendToAgent?: boolean;
+      sessionId?: string;
+    };
+
+    wakeWordManager.setConfig(body as any);
+
+    // Persist to Vault
+    if (vault?.isInitialized()) {
+      const fullConfig = wakeWordManager.getConfig();
+      vault.set('config:wakeword', JSON.stringify(fullConfig));
+    }
+
+    // Also save access key separately to Vault (encrypted)
+    if (body.accessKey && vault?.isInitialized()) {
+      vault.set('env:PICOVOICE_ACCESS_KEY', body.accessKey);
+      process.env.PICOVOICE_ACCESS_KEY = body.accessKey;
+    }
+
+    logger.info('Wake word config updated', { keyword: body.keyword, enabled: body.enabled });
+    const config = wakeWordManager.getConfig();
+    return { config: { ...config, accessKey: config.accessKey ? '***' : undefined } };
+  });
+
+  // POST /api/wakeword/start — start wake word detection
+  app.post('/api/wakeword/start', async (_request: FastifyRequest, reply: FastifyReply) => {
+    if (!wakeWordManager) {
+      reply.status(503).send({ error: 'Wake word not initialized' });
+      return;
+    }
+    try {
+      await wakeWordManager.start();
+      return { success: true, status: wakeWordManager.getStatus() };
+    } catch (error: any) {
+      reply.status(500).send({ error: error.message });
+      return;
+    }
+  });
+
+  // POST /api/wakeword/stop — stop wake word detection
+  app.post('/api/wakeword/stop', async () => {
+    if (!wakeWordManager) return { error: 'Wake word not initialized' };
+    await wakeWordManager.stop();
+    return { success: true, status: wakeWordManager.getStatus() };
+  });
+
+  // POST /api/wakeword/process — process an audio frame (base64 Int16 PCM)
+  app.post('/api/wakeword/process', async (request: FastifyRequest) => {
+    if (!wakeWordManager?.isRunning()) return { detected: false, running: false };
+    const body = request.body as { audio?: string };
+    if (!body.audio) return { detected: false, error: 'audio (base64 Int16 PCM) required' };
+
+    const buffer = Buffer.from(body.audio, 'base64');
+    const frame = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 2);
+    const detected = await wakeWordManager.processAudioFrame(frame);
+    return { detected, running: true };
   });
 
   // ─── Language Setting ──────────────────────────────

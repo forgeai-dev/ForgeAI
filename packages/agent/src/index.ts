@@ -28,3 +28,5 @@ export { RAGEngine, createRAGEngine, extractTextFromFile } from './rag-engine.js
 export type { RAGDocument, RAGChunk, RAGSearchResult, RAGConfig, EmbeddingProvider } from './rag-engine.js';
 export { AutoPlanner, createAutoPlanner } from './auto-planner.js';
 export type { Plan, PlanStep, PlannerConfig } from './auto-planner.js';
+export { WakeWordManager, createWakeWordManager } from './wake-word.js';
+export type { WakeWordEventHandler, WakeWordDetector } from './wake-word.js';

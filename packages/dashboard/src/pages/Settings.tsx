@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { useI18n, type Lang } from '@/lib/i18n';
 
@@ -36,6 +36,7 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   'kokoro-api-url': { placeholder: 'http://167.86.85.73:8881', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
   'kokoro-api-key': { placeholder: 'Enter Kokoro API key...', desc: 'Bearer token for Kokoro TTS auth (nginx proxy)' },
   'node-api-key': { placeholder: 'Enter Node Protocol API key...', desc: 'Shared secret for IoT/embedded node agents (Raspberry Pi, Jetson, BeagleBone, etc.)' },
+  'picovoice-key': { placeholder: 'Enter Picovoice AccessKey...', desc: 'Wake word detection with Porcupine — say "Hey Forge" to activate hands-free' },
 };
 
 export function SettingsPage() {
@@ -69,6 +70,11 @@ export function SettingsPage() {
 
   // Node Protocol state
   const [nodeGenerating, setNodeGenerating] = useState(false);
+
+  // Wake Word state
+  const [wakeWordStatus, setWakeWordStatus] = useState<{ enabled: boolean; running: boolean; keyword: string; sensitivity: number; detectionCount: number; lastDetection?: string; uptime: number } | null>(null);
+  const [wakeWordStarting, setWakeWordStarting] = useState(false);
+  const [wakeWordSensitivity, setWakeWordSensitivity] = useState(0.5);
   const [nodeGeneratedKey, setNodeGeneratedKey] = useState<string | null>(null);
   const [nodeConnInfo, setNodeConnInfo] = useState<{ gatewayUrl?: string; wsUrl?: string; keyPrefix?: string; example?: string } | null>(null);
   const [nodeCopied, setNodeCopied] = useState<string | null>(null);
@@ -82,6 +88,22 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => { loadProviders(); loadServices(); }, [loadProviders, loadServices]);
+
+  // Load wake word status
+  const loadWakeWordStatus = useCallback(() => {
+    fetch('/api/wakeword/status').then(r => r.json()).then((d: { status: any }) => {
+      if (d.status) {
+        setWakeWordStatus(d.status);
+        setWakeWordSensitivity(d.status.sensitivity ?? 0.5);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadWakeWordStatus();
+    const interval = setInterval(loadWakeWordStatus, 5000);
+    return () => clearInterval(interval);
+  }, [loadWakeWordStatus]);
 
   // Load node connection info when node is configured
   const nodeConfigured = services.find(s => s.name === 'node-api-key')?.configured ?? false;
@@ -952,6 +974,174 @@ export function SettingsPage() {
             <a href="/voice" className="text-xs px-3 py-1.5 rounded-lg bg-forge-500/20 text-forge-400 hover:bg-forge-500/30 transition-colors">
               Configure →
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Wake Word Detection */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Radio className="w-5 h-5 text-forge-400" />
+            Wake Word Detection
+          </h2>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${wakeWordStatus?.running ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+            {wakeWordStatus?.running ? 'Listening' : 'Stopped'}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800">
+          {/* Picovoice AccessKey */}
+          {(() => {
+            const svc = services.find(s => s.name === 'picovoice-key');
+            const meta = SERVICE_META['picovoice-key'];
+            const isConfigured = svc?.configured ?? false;
+            const isSaving = svcSaving['picovoice-key'] ?? false;
+            const isSaved = svcSaved['picovoice-key'] ?? false;
+            const isVisible = svcShowKey['picovoice-key'] ?? false;
+            return (
+              <div className="p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-white">Picovoice AccessKey</span>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+                    {isConfigured ? 'Connected' : 'Not set'}
+                  </span>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">AccessKey</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type={isVisible ? 'text' : 'password'}
+                        placeholder={isConfigured ? '••••••••••••' : meta.placeholder}
+                        value={svcKeys['picovoice-key'] ?? ''}
+                        onChange={e => setSvcKeys(k => ({ ...k, 'picovoice-key': e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && handleSvcSave('picovoice-key')}
+                        className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                      />
+                      <button aria-label="Toggle visibility" onClick={() => setSvcShowKey(s => ({ ...s, 'picovoice-key': !isVisible }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                        {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <button aria-label="Save Picovoice key" onClick={() => handleSvcSave('picovoice-key')} disabled={isSaving || !(svcKeys['picovoice-key']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${isSaved ? 'bg-emerald-500' : isSaving ? 'bg-forge-500/50 cursor-wait' : svcKeys['picovoice-key']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {isSaved ? <Check className="w-4 h-4" /> : isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                    {isConfigured && (
+                      <button aria-label="Remove Picovoice key" onClick={() => handleSvcRemove('picovoice-key')} disabled={svcDeleting['picovoice-key']}
+                        className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                        {svcDeleting['picovoice-key'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+                  {svcErrors['picovoice-key'] && <p className="text-xs text-red-400 mt-1">{svcErrors['picovoice-key']}</p>}
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    Free tier: 3 months. Get your key at{' '}
+                    <a href="https://console.picovoice.ai/" target="_blank" rel="noopener noreferrer" className="text-forge-400 hover:underline">
+                      console.picovoice.ai
+                    </a>
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Wake Word Controls */}
+          <div className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium text-white">Detection Controls</span>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  Keyword: <code className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-300">{wakeWordStatus?.keyword ?? 'hey_forge'}</code>
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setWakeWordStarting(true);
+                  try {
+                    const endpoint = wakeWordStatus?.running ? '/api/wakeword/stop' : '/api/wakeword/start';
+                    await fetch(endpoint, { method: 'POST' });
+                    loadWakeWordStatus();
+                  } catch { /* ignore */ }
+                  setWakeWordStarting(false);
+                }}
+                disabled={wakeWordStarting}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  wakeWordStatus?.running
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                    : 'bg-forge-500 hover:bg-forge-600 text-white'
+                } disabled:opacity-50`}
+              >
+                {wakeWordStarting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : wakeWordStatus?.running ? (
+                  <MicOff className="w-4 h-4" />
+                ) : (
+                  <Mic className="w-4 h-4" />
+                )}
+                {wakeWordStatus?.running ? 'Stop Listening' : 'Start Listening'}
+              </button>
+            </div>
+
+            {/* Sensitivity slider */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-zinc-400">Sensitivity</label>
+                <span className="text-xs text-zinc-300 font-mono">{wakeWordSensitivity.toFixed(2)}</span>
+              </div>
+              <input
+                title="Wake word sensitivity"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={wakeWordSensitivity}
+                onChange={e => setWakeWordSensitivity(parseFloat(e.target.value))}
+                onMouseUp={async () => {
+                  await fetch('/api/wakeword/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sensitivity: wakeWordSensitivity }),
+                  });
+                  loadWakeWordStatus();
+                }}
+                className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-forge-500"
+              />
+              <div className="flex justify-between text-[10px] text-zinc-500">
+                <span>Less sensitive (fewer false positives)</span>
+                <span>More sensitive</span>
+              </div>
+            </div>
+
+            {/* Status info */}
+            {wakeWordStatus && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-zinc-800/50 rounded-lg p-3 text-center">
+                  <p className="text-lg font-bold text-white">{wakeWordStatus.detectionCount}</p>
+                  <p className="text-[10px] text-zinc-500">Detections</p>
+                </div>
+                <div className="bg-zinc-800/50 rounded-lg p-3 text-center">
+                  <p className="text-lg font-bold text-white">{wakeWordStatus.uptime > 0 ? `${Math.floor(wakeWordStatus.uptime / 60)}m` : '—'}</p>
+                  <p className="text-[10px] text-zinc-500">Uptime</p>
+                </div>
+                <div className="bg-zinc-800/50 rounded-lg p-3 text-center">
+                  <p className="text-lg font-bold text-white">{wakeWordStatus.lastDetection ? new Date(wakeWordStatus.lastDetection).toLocaleTimeString() : '—'}</p>
+                  <p className="text-[10px] text-zinc-500">Last Detection</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-forge-500/10 border border-forge-500/20">
+              <Info className="w-3.5 h-3.5 text-forge-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[10px] text-forge-300/90 leading-relaxed">
+                Say <strong>&quot;Hey Forge&quot;</strong> to activate hands-free voice commands.
+                Works on desktop (microphone), mobile (browser), and embedded devices (Node Protocol).
+                Requires Picovoice AccessKey for accurate detection. Without it, a basic energy-based fallback is used.
+              </p>
+            </div>
           </div>
         </div>
       </section>

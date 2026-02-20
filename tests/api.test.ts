@@ -21,6 +21,15 @@ async function post(path: string, body?: unknown) {
   return { status: res.status, data: await res.json() };
 }
 
+async function put(path: string, body?: unknown) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, data: await res.json() };
+}
+
 describe('ForgeAI Gateway API Tests', () => {
   // ─── Health ────────────────────────────────────────
   describe('Health & Info', () => {
@@ -493,6 +502,39 @@ describe('ForgeAI Gateway API Tests', () => {
     it('POST /api/voice/transcribe without audio should return 400', async () => {
       const { status } = await post('/api/voice/transcribe', {});
       expect([400, 429]).toContain(status);
+    });
+  });
+
+  // ─── Wake Word Detection ────────────────────────
+  describe('Wake Word Detection', () => {
+    it('GET /api/wakeword/status should return status', async () => {
+      const { status, data } = await get('/api/wakeword/status');
+      expect(status).toBe(200);
+      expect(data.status).toBeDefined();
+      expect(data.status.enabled).toBeDefined();
+      expect(data.status.running).toBeDefined();
+      expect(data.status.keyword).toBeDefined();
+    });
+
+    it('GET /api/wakeword/config should return config with masked accessKey', async () => {
+      const { status, data } = await get('/api/wakeword/config');
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(data.config.keyword).toBeDefined();
+      expect(data.config.sensitivity).toBeGreaterThanOrEqual(0);
+      expect(data.config.sensitivity).toBeLessThanOrEqual(1);
+    });
+
+    it('PUT /api/wakeword/config should update config', async () => {
+      const { status, data } = await put('/api/wakeword/config', { sensitivity: 0.7 });
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+    });
+
+    it('POST /api/wakeword/process without audio should return error', async () => {
+      const { status, data } = await post('/api/wakeword/process', {});
+      expect(status).toBe(200);
+      expect(data.detected).toBe(false);
     });
   });
 });
