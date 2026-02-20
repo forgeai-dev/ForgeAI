@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
@@ -9,21 +9,24 @@ import type { ToolDefinition, ToolResult } from '../base.js';
 const BLOCKED_DOMAINS: string[] = [];
 
 const SCREENSHOT_DIR = resolve(process.cwd(), '.forgeai', 'screenshots');
+const PROFILES_DIR = resolve(process.cwd(), '.forgeai', 'browser-profiles');
+const SNAPSHOTS_DIR = resolve(process.cwd(), '.forgeai', 'snapshots');
 const MAX_NAV_TIMEOUT = 30_000;
 
 const STEALTH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export class PuppeteerBrowserTool extends BaseTool {
   private browser: Browser | null = null;
+  private currentProfile: string = 'default';
 
   readonly definition: ToolDefinition = {
     name: 'browser',
-    description: 'Full browser control via headless Chrome: navigate, screenshot, extract content/tables, click, type, scroll, hover, select dropdowns, go back/forward/reload, wait for elements, manage cookies, execute JS, export PDF. Supports multi-tab.',
+    description: 'Full browser control via headless Chrome: navigate, screenshot, extract content/tables, click, type, scroll, hover, select dropdowns, go back/forward/reload, wait for elements, manage cookies, execute JS, export PDF, upload files, manage profiles (persistent sessions/logins), capture DOM snapshots. Supports multi-tab and multi-profile.',
     category: 'browser',
     parameters: [
-      { name: 'action', type: 'string', description: 'Action: navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close', required: true },
+      { name: 'action', type: 'string', description: 'Action: navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|upload|switch_profile|list_profiles|snapshot|close', required: true },
       { name: 'url', type: 'string', description: 'URL for navigate action', required: false },
-      { name: 'selector', type: 'string', description: 'CSS selector for click/type/hover/select/content/wait/extract_table', required: false },
+      { name: 'selector', type: 'string', description: 'CSS selector for click/type/hover/select/content/wait/extract_table/upload', required: false },
       { name: 'text', type: 'string', description: 'Text for type action', required: false },
       { name: 'value', type: 'string', description: 'Value for select (dropdown) action', required: false },
       { name: 'script', type: 'string', description: 'JavaScript for evaluate action', required: false },
@@ -34,14 +37,33 @@ export class PuppeteerBrowserTool extends BaseTool {
       { name: 'timeout', type: 'number', description: 'Wait timeout in ms (default: 10000)', required: false, default: 10000 },
       { name: 'cookie', type: 'object', description: 'Cookie object {name, value, domain, path} for set_cookie', required: false },
       { name: 'tabIndex', type: 'number', description: 'Tab index for switch_tab/close_tab', required: false },
+      { name: 'filePath', type: 'string', description: 'Absolute file path for upload action', required: false },
+      { name: 'filePaths', type: 'object', description: 'Array of absolute file paths for multi-file upload', required: false },
+      { name: 'profile', type: 'string', description: 'Profile name for switch_profile (alphanumeric + hyphens, e.g. "gmail", "work", "linkedin")', required: false },
     ],
   };
 
-  private async ensureBrowser(): Promise<{ browser: Browser; page: Page }> {
+  private async ensureBrowser(profile?: string): Promise<{ browser: Browser; page: Page }> {
+    const targetProfile = profile ?? this.currentProfile;
+    const profileDir = resolve(PROFILES_DIR, targetProfile.replace(/[^a-zA-Z0-9_-]/g, '_'));
+
+    // If switching profile, close existing browser first
+    if (this.browser?.connected && profile && profile !== this.currentProfile) {
+      await this.browser.close();
+      this.browser = null;
+      this.currentProfile = targetProfile;
+    }
+
     if (!this.browser || !this.browser.connected) {
+      if (!existsSync(profileDir)) {
+        mkdirSync(profileDir, { recursive: true });
+      }
+      this.currentProfile = targetProfile;
+
       try {
         this.browser = await puppeteer.launch({
           headless: 'shell',
+          userDataDir: profileDir,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -110,8 +132,13 @@ export class PuppeteerBrowserTool extends BaseTool {
       return this.closeAction();
     }
 
+    if (action === 'list_profiles') {
+      return this.listProfilesAction();
+    }
+
     const { result, duration } = await this.timed(async () => {
-      const { page } = await this.ensureBrowser();
+      const profileParam = params['profile'] as string | undefined;
+      const { page } = await this.ensureBrowser(action === 'switch_profile' ? profileParam : undefined);
 
       switch (action) {
         case 'navigate':
@@ -159,8 +186,14 @@ export class PuppeteerBrowserTool extends BaseTool {
           return this.switchTabAction(params);
         case 'close_tab':
           return this.closeTabAction(params);
+        case 'upload':
+          return this.uploadAction(page, params);
+        case 'switch_profile':
+          return this.switchProfileAction(page);
+        case 'snapshot':
+          return this.snapshotAction(page);
         default:
-          throw new Error(`Unknown action: ${action}. Valid: navigate, screenshot, content, click, type, scroll, hover, select, back, forward, reload, wait, cookies, set_cookie, clear_cookies, extract_table, evaluate, pdf, new_tab, switch_tab, close_tab, close`);
+          throw new Error(`Unknown action: ${action}. Valid: navigate, screenshot, content, click, type, scroll, hover, select, back, forward, reload, wait, cookies, set_cookie, clear_cookies, extract_table, evaluate, pdf, new_tab, switch_tab, close_tab, upload, switch_profile, list_profiles, snapshot, close`);
       }
     });
 
@@ -493,12 +526,166 @@ export class PuppeteerBrowserTool extends BaseTool {
     return { closed: idx, totalTabs: remaining.length };
   }
 
+  // ─── File Upload ─────────────────────────────────────
+
+  private async uploadAction(page: Page, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const selector = params['selector'] as string | undefined;
+    const filePath = params['filePath'] as string | undefined;
+    const filePaths = params['filePaths'] as string[] | undefined;
+
+    const files = filePaths ?? (filePath ? [filePath] : []);
+    if (files.length === 0) throw new Error('filePath or filePaths is required for upload action');
+
+    // Validate all files exist
+    for (const fp of files) {
+      if (!existsSync(fp)) throw new Error(`File not found: ${fp}`);
+    }
+
+    if (selector) {
+      // Direct input[type=file] — set files directly via CDP
+      await page.waitForSelector(selector, { timeout: 5_000 });
+      const inputEl = await page.$(selector);
+      if (!inputEl) throw new Error(`Element not found: ${selector}`);
+      await inputEl.uploadFile(...files);
+      return { uploaded: files.length, files, selector, method: 'input' };
+    }
+
+    // No selector — use file chooser interception (click the last known file input or button)
+    const [fileChooser] = await Promise.all([
+      page.waitForFileChooser({ timeout: 5_000 }),
+      page.evaluate(`
+        (() => {
+          const input = document.querySelector('input[type="file"]');
+          if (input) { input.click(); return; }
+          const buttons = Array.from(document.querySelectorAll('button, [role="button"], label'));
+          const uploadBtn = buttons.find(b => /upload|choose|select|arquivo|enviar/i.test(b.textContent || ''));
+          if (uploadBtn) uploadBtn.click();
+        })()
+      `),
+    ]);
+
+    await fileChooser.accept(files);
+    return { uploaded: files.length, files, method: 'file_chooser' };
+  }
+
+  // ─── Profile Management ─────────────────────────────────────
+
+  private async switchProfileAction(page: Page): Promise<Record<string, unknown>> {
+    const title = await page.title();
+    return {
+      profile: this.currentProfile,
+      url: page.url(),
+      title,
+      profileDir: resolve(PROFILES_DIR, this.currentProfile),
+      hint: 'Profile switched. Cookies, logins, and session data persist across restarts.',
+    };
+  }
+
+  private async listProfilesAction(): Promise<ToolResult> {
+    const start = Date.now();
+    if (!existsSync(PROFILES_DIR)) {
+      mkdirSync(PROFILES_DIR, { recursive: true });
+    }
+
+    const profiles = readdirSync(PROFILES_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+
+    return {
+      success: true,
+      data: {
+        profiles,
+        count: profiles.length,
+        current: this.currentProfile,
+        hint: 'Use switch_profile with profile="name" to switch. Each profile has its own cookies, logins, and localStorage.',
+      },
+      duration: Date.now() - start,
+    };
+  }
+
+  // ─── DOM Snapshot ─────────────────────────────────────
+
+  private async snapshotAction(page: Page): Promise<Record<string, unknown>> {
+    if (!existsSync(SNAPSHOTS_DIR)) {
+      mkdirSync(SNAPSHOTS_DIR, { recursive: true });
+    }
+
+    const cookies = await page.cookies();
+    const title = await page.title();
+    const url = page.url();
+
+    const pageState = await page.evaluate(`
+      (() => {
+        const ls = {};
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) ls[key] = (localStorage.getItem(key) || '').slice(0, 2000);
+          }
+        } catch {}
+        const ss = {};
+        try {
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key) ss[key] = (sessionStorage.getItem(key) || '').slice(0, 2000);
+          }
+        } catch {}
+        const forms = Array.from(document.querySelectorAll('form')).slice(0, 10).map(form => {
+          const inputs = Array.from(form.querySelectorAll('input, select, textarea')).slice(0, 30).map(el => ({
+            tag: el.tagName.toLowerCase(),
+            type: el.type || undefined,
+            name: el.name || undefined,
+            id: el.id || undefined,
+            value: (el.value || '').slice(0, 500),
+            checked: el.checked ?? undefined,
+          }));
+          return { action: form.action, method: form.method, inputs };
+        });
+        const scroll = { x: window.scrollX, y: window.scrollY };
+        const viewport = { width: window.innerWidth, height: window.innerHeight };
+        return { localStorage: ls, sessionStorage: ss, forms, scroll, viewport };
+      })()
+    `) as { localStorage: Record<string, string>; sessionStorage: Record<string, string>; forms: any[]; scroll: { x: number; y: number }; viewport: { width: number; height: number } };
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      profile: this.currentProfile,
+      url,
+      title,
+      cookies: cookies.map(c => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, httpOnly: c.httpOnly, secure: c.secure, expires: c.expires })),
+      localStorage: pageState.localStorage,
+      sessionStorage: pageState.sessionStorage,
+      forms: pageState.forms,
+      scroll: pageState.scroll,
+      viewport: pageState.viewport,
+    };
+
+    const filename = `snapshot_${Date.now()}.json`;
+    const filepath = resolve(SNAPSHOTS_DIR, filename);
+    writeFileSync(filepath, JSON.stringify(snapshot, null, 2), 'utf-8');
+
+    return {
+      path: filepath,
+      filename,
+      url,
+      title,
+      profile: this.currentProfile,
+      cookieCount: cookies.length,
+      localStorageKeys: Object.keys(pageState.localStorage).length,
+      sessionStorageKeys: Object.keys(pageState.sessionStorage).length,
+      formsCount: pageState.forms.length,
+    };
+  }
+
+  // ─── Close ─────────────────────────────────────
+
   private async closeAction(): Promise<ToolResult> {
     const start = Date.now();
+    const profile = this.currentProfile;
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
     }
-    return { success: true, data: { status: 'browser closed' }, duration: Date.now() - start };
+    return { success: true, data: { status: 'browser closed', profile, hint: 'Profile data persisted. Reopen with same profile to restore session.' }, duration: Date.now() - start };
   }
 }

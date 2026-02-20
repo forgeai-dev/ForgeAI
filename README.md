@@ -150,7 +150,7 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | Tool | What it does |
 |:-----|:-------------|
 | `web_browse` | HTTP fetch + parse (Cheerio). GET/POST/PUT/DELETE, custom headers, extract: text/links/images/tables/metadata/json. |
-| `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab. |
+| `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab, **multi-profile** (persistent logins), **file upload**, **DOM snapshots**. |
 | `web_search` | Search Google/DuckDuckGo — returns structured results (title, URL, snippet). Auto-fallback between engines. |
 | `file_manager` | Full system file manager: read, write, list, delete, copy, move, search, permissions (chmod), disk info. Supports absolute paths for full system access. |
 | `shell_exec` | Execute system commands with timeout, output capture, and error handling. |
