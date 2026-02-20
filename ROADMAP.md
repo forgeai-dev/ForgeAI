@@ -148,8 +148,8 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 │  Go/Rust ~5MB   │ WS  │  Node.js completo │
 └─────────────────┘     └──────────────────┘
    Raspberry Pi            Seu computador
-   ESP32 + WiFi            com toda a IA
-   NanoKVM
+   Jetson · NanoKVM        com toda a IA
+   BeagleBone
 ```
 
 ### Arquitetura
@@ -162,7 +162,7 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 ║  ┌─────────┐  ┌─────────┐  ┌─────────┐  ║
 ║  │ Node A  │  │ Node B  │  │ Node C  │  ║
 ║  │ Sensor  │  │ Camera  │  │ Switch  │  ║
-║  │ ESP32   │  │ RPi Zero│  │ ESP32   │  ║
+║  │ RPi 4   │  │ RPi Zero│  │ Jetson  │  ║
 ║  └────┬────┘  └────┬────┘  └────┬────┘  ║
 ║       │            │            │        ║
 ║       └────────────┼────────────┘        ║
@@ -202,7 +202,7 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 **Prós:**
 - Abre mercado de **IoT + IA** (home automation, monitoramento)
 - Unique approach — AI-powered Node-to-Node coordination via central Gateway
-- Custo baixo (Raspberry Pi Zero = $15, ESP32 = $5)
+- Custo baixo (Raspberry Pi Zero = $15, Orange Pi = $20)
 - Já temos a infra pronta (WebSocket, multi-agent, sessions_send)
 
 **Contras:**
@@ -228,7 +228,7 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 | **Intelligence** | Unlimited — uses the full Gateway (LLM, RAG, tools) |
 | **Multi-device** | Coordinated network with central AI |
 | **Node-to-Node** | Via Gateway with AI deciding actions |
-| **Cost** | Raspberry Pi Zero ($15), ESP32 ($5) |
+| **Cost** | Raspberry Pi Zero ($15), Orange Pi ($20) |
 
 ---
 

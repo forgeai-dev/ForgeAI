@@ -121,7 +121,7 @@ Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 | **Microsoft Teams** | Bot Framework | Webhook-based, conversation references, adaptive cards |
 | **Google Chat** | Chat API | Webhook + async REST, service account JWT, space routing |
 | **WebChat** | Built-in | Browser-based, real-time execution steps, session persistence |
-| **Node Protocol** | Go agent (~5MB) | WebSocket, IoT/embedded devices, Raspberry Pi, ESP32, NanoKVM, node-to-node relay |
+| **Node Protocol** | Go agent (~5MB) | WebSocket, IoT/embedded (Raspberry Pi, Jetson, BeagleBone, NanoKVM), node-to-node relay |
 
 ### LLM Providers (10) with Automatic Failover
 
@@ -325,7 +325,152 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
 
 ---
 
-## 🔌 Integrations
+## � Node Protocol (IoT/Embedded Devices)
+
+Connect lightweight devices to your AI via WebSocket. A single Go binary (~5MB, zero dependencies) turns any Linux board into an AI-powered node.
+
+<details>
+<summary><b>🖥 Supported Devices</b></summary>
+
+| Device | Architecture | Binary | Status |
+|:-------|:-------------|:-------|:-------|
+| **Raspberry Pi 5** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **Raspberry Pi 4 Model B** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **Raspberry Pi 3 B/B+** | ARMv7 / ARM64 | `forgeai-node-linux-armv7` | ✅ Full support |
+| **Raspberry Pi 2** | ARMv7 | `forgeai-node-linux-armv7` | ✅ Full support |
+| **Raspberry Pi Zero 2 W** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **Orange Pi / Banana Pi** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **NVIDIA Jetson Nano/Xavier** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **BeagleBone Black/Green** | ARMv7 | `forgeai-node-linux-armv7` | ✅ Full support |
+| **Pine64 / ODROID** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **NanoKVM** | ARM64 | `forgeai-node-linux-arm64` | ✅ Full support |
+| **Any Linux server/VPS** | AMD64 | `forgeai-node-linux-amd64` | ✅ Full support |
+| **Windows PC** | AMD64 | `forgeai-node-windows-amd64.exe` | ✅ Full support |
+| **macOS (Intel)** | AMD64 | `forgeai-node-darwin-amd64` | ✅ Full support |
+| **macOS (Apple Silicon)** | ARM64 | `forgeai-node-darwin-arm64` | ✅ Full support |
+
+> **Note:** ESP32, Arduino, and STM32 are **not supported** — the Go binary requires a full Linux/Windows/macOS operating system. A future C/Rust micro-agent is planned for bare-metal MCUs.
+
+</details>
+
+<details>
+<summary><b>⚡ Quick Setup (Raspberry Pi)</b></summary>
+
+```bash
+# 1. Download the binary (from GitHub Releases)
+wget https://github.com/forgeai-dev/ForgeAI/releases/download/node-agent-latest/forgeai-node-linux-arm64
+chmod +x forgeai-node-linux-arm64
+
+# 2. Generate API key in Dashboard → Settings → Node Protocol → "Generate Secure Key"
+
+# 3. Run
+./forgeai-node-linux-arm64 \
+  --gateway http://YOUR_GATEWAY_IP:18800 \
+  --token YOUR_NODE_API_KEY \
+  --name "My-RaspberryPi"
+```
+
+To run on boot as a **systemd service**:
+
+```bash
+sudo tee /etc/systemd/system/forgeai-node.service << EOF
+[Unit]
+Description=ForgeAI Node Agent
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/forgeai-node-linux-arm64
+Environment=FORGEAI_GATEWAY=http://YOUR_GATEWAY_IP:18800
+Environment=FORGEAI_NODE_TOKEN=your-api-key
+Environment=FORGEAI_NODE_NAME=RaspberryPi-Office
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable --now forgeai-node
+```
+
+</details>
+
+<details>
+<summary><b>🔧 Auto-Detected Capabilities</b></summary>
+
+The agent automatically detects what the device can do:
+
+| Capability | Detection | Example Use |
+|:-----------|:----------|:------------|
+| `shell` | Always available | Execute any command remotely via AI |
+| `system` | Always available | CPU, RAM, disk, temperature, uptime monitoring |
+| `gpio` | `/sys/class/gpio` exists | Control LEDs, relays, sensors on Raspberry Pi |
+| `camera` | `raspistill` or `libcamera-still` found | Take photos, surveillance |
+| `docker` | `docker` CLI available | Manage containers remotely |
+| `network` | `ip` command available | Network diagnostics, interface management |
+
+</details>
+
+<details>
+<summary><b>📐 Architecture</b></summary>
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                     IoT DEVICES                           │
+│  Raspberry Pi · Jetson · BeagleBone · Orange Pi · NanoKVM │
+│              forgeai-node binary (~5MB)                    │
+└─────────────────────┬────────────────────────────────────┘
+                      │ WebSocket (JSON)
+                      │ wss://gateway:18800/ws/node
+                      │
+        ┌─────────────▼──────────────┐
+        │    ForgeAI Gateway          │
+        │                             │
+        │  ┌─────────────────────┐    │
+        │  │   NodeChannel       │    │
+        │  │   • Auth (API Key)  │    │
+        │  │   • Heartbeat (25s) │    │
+        │  │   • Node Registry   │    │
+        │  │   • Command Relay   │    │
+        │  │   • Node-to-Node    │    │
+        │  └─────────┬───────────┘    │
+        │            │                │
+        │  ┌─────────▼───────────┐    │
+        │  │   AgentManager      │    │
+        │  │   (AI Processing)   │    │
+        │  └─────────────────────┘    │
+        └─────────────────────────────┘
+
+Message Flow:
+  Device sends text → NodeChannel → AgentManager → LLM → Response → Device
+  Gateway sends command → NodeChannel → Device executes → Result → Gateway
+  Device A → relay → NodeChannel → Device B (node-to-node)
+```
+
+</details>
+
+<details>
+<summary><b>🔑 Key Management</b></summary>
+
+The Node Protocol API key is managed entirely via the **Dashboard** (no `.env` needed):
+
+1. **Dashboard → Settings → Node Protocol** → Click **"Generate Secure Key"**
+2. Key is encrypted with **AES-256-GCM** and stored in Vault
+3. Key persists across Gateway restarts
+4. **Hot-reload** — changing the key instantly reconfigures the NodeChannel (no restart needed)
+5. Connection instructions and copyable CLI command shown directly in Dashboard
+
+API endpoints:
+- `POST /api/nodes/generate-key` — Generate new key
+- `GET /api/nodes/connection-info` — Get WebSocket URL + CLI example
+- `GET /api/nodes` — List connected nodes
+- `POST /api/nodes/:id/command` — Execute command on a device
+
+</details>
+
+---
+
+## �� Integrations
 
 | Integration | Capabilities |
 |:------------|:-------------|
@@ -404,7 +549,7 @@ packages/
 ├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing
 ├── cli/         →  CLI commands: start, doctor, status, onboard
 ├── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
-└── node-agent/  →  Lightweight Go binary (~5MB) for IoT/embedded devices (Raspberry Pi, ESP32)
+└── node-agent/  →  Lightweight Go binary (~5MB) for IoT/embedded devices (Raspberry Pi, Jetson, BeagleBone)
 ```
 
 ---
@@ -576,7 +721,7 @@ All core features are implemented and tested:
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
-- **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, ESP32, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
+- **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, Jetson, BeagleBone, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
 - **Configurable Models** — All 10 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)

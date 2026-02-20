@@ -1,76 +1,35 @@
 ## Description
 
-Complete internationalization (i18n) system for the Dashboard, agent identity fix to prevent hallucination, TTS text sanitization, streaming TTS playback, and voice/language config persistence in Vault.
+Add a dedicated Node Protocol section to the README with supported devices table, quick setup guide, architecture diagram, auto-detected capabilities, and key management info. Fix incorrect ESP32 references across the entire codebase — ESP32 is not supported by the Go binary (requires full Linux/Windows/macOS OS).
 
 ## Type of Change
 
-- [x] Bug fix
+- [ ] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
-- [ ] Documentation
+- [x] Documentation
 - [ ] Tests
 - [ ] Security
 
 ## Changes Made
 
-### 1. Dashboard i18n System (9 languages)
-
-- **New `i18n.ts`** — translation dictionaries for EN, PT-BR, ES, FR, DE, IT, JA, KO, ZH
-- **New `I18nProvider.tsx`** — React Context managing language state, loads from Vault API on mount
-- **Language selector** in Settings saves to Vault + localStorage, updates entire UI instantly
-- **Translated pages**: Layout (sidebar + footer), Settings, Chat, Overview — all hardcoded strings replaced with `t()` calls
-
-### 2. Agent Identity Fix (Anti-Hallucination)
-
-- **System prompt** now explicitly states: "You are ForgeAI, NOT Claude, NOT GPT, NOT Gemini"
-- **Anti-hallucination rule**: "Only describe capabilities you actually have based on the tools listed below"
-- **Applies to both** full prompt and lightweight local LLM prompt
-
-### 3. TTS Text Sanitization
-
-- **New `sanitizeForTTS()`** method in VoiceEngine — strips markdown, emojis, tables, code blocks, HTML tags, etc.
-- **Auto-applied** in `speak()` before synthesis
-
-### 4. TTS Streaming Playback
-
-- **Sentence-by-sentence** TTS in Chat — splits text into chunks, plays first chunk ASAP while fetching rest
-- **Sequential audio queue** for natural pacing
-
-### 5. Config Persistence in Vault
-
-- **Voice config** (TTS/STT provider, voice, speed) saved to Vault on change, restored on gateway restart
-- **Language setting** persisted via `PUT /api/settings/language` endpoint
-
----
-
-## Files Changed (14 files)
-
-| File | Change |
-|:-----|:-------|
-| `packages/dashboard/src/lib/i18n.ts` | **NEW** — Translation dictionaries + useI18n hook |
-| `packages/dashboard/src/components/I18nProvider.tsx` | **NEW** — React i18n context provider |
-| `packages/dashboard/src/App.tsx` | Wrap app with I18nProvider |
-| `packages/dashboard/src/components/Layout.tsx` | Use t() for nav labels + footer |
-| `packages/dashboard/src/pages/Settings.tsx` | Use t() for all section headers, labels, Claude subscription |
-| `packages/dashboard/src/pages/Chat.tsx` | Use t() for sidebar, input, status messages |
-| `packages/dashboard/src/pages/Overview.tsx` | Use t() for all stats, alerts, tables, sections |
-| `packages/agent/src/runtime.ts` | Fix system prompt identity + anti-hallucination |
-| `packages/agent/src/voice-engine.ts` | Add sanitizeForTTS(), integrate in speak() |
-| `packages/core/src/gateway/chat-routes.ts` | Voice config Vault persistence + language API endpoints |
-| `packages/shared/src/types/voice.ts` | VPS STT/TTS provider types |
-| `packages/channels/src/telegram.ts` | Telegram voice message handling |
-| `packages/agent/src/providers/ollama.ts` | Ollama provider updates |
-| `.env.example` | New env vars for VPS STT/TTS |
+- **README.md**: New "Node Protocol (IoT/Embedded Devices)" section with:
+  - Supported Devices table (14 devices with architecture and binary info)
+  - Quick Setup guide for Raspberry Pi (download, run, systemd service)
+  - Auto-Detected Capabilities table (shell, system, gpio, camera, docker, network)
+  - Architecture diagram (Device → NodeChannel → AgentManager → LLM)
+  - Key Management documentation (Dashboard, Vault, hot-reload, API endpoints)
+  - Note clarifying ESP32/Arduino/STM32 are not supported (future C/Rust micro-agent)
+- **README.md**: Fixed ESP32 mentions in channels table, monorepo structure, roadmap section
+- **ROADMAP.md**: Replaced ESP32 with supported devices (Jetson, BeagleBone, Orange Pi) in diagrams and cost tables
+- **Settings.tsx**: Fixed ESP32 mentions in Dashboard UI descriptions
+- **node-protocol.ts**: Fixed ESP32 mention in shared types platform comment
 
 ## How to Test
 
-1. `pnpm -r build`
-2. `pnpm forge start --migrate`
-3. Open Dashboard → Settings → change language to Português (BR)
-4. Verify all pages (Overview, Chat, Settings) update instantly
-5. Refresh page — language persists
-6. Open Chat → ask "quem é você?" — agent should say "ForgeAI" (not Claude/GPT)
-7. Test voice mode in Chat — TTS should play clean audio without markdown artifacts
+1. `pnpm -r build` — all packages build cleanly
+2. Review README Node Protocol section renders correctly on GitHub
+3. Verify no remaining ESP32 references in code (`grep -r ESP32`)
 
 ## Related Issue
 
@@ -83,6 +42,19 @@ N/A
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
+- [x] Tests pass (`pnpm test`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
 - [x] Documentation updated (if needed)
+
+---
+
+### Files Changed (5 files)
+
+| File | Change |
+|:-----|:-------|
+| `README.md` | New Node Protocol section + ESP32 fixes |
+| `ROADMAP.md` | Replace ESP32 with supported devices in diagrams |
+| `packages/dashboard/src/pages/Settings.tsx` | Fix device names in UI descriptions |
+| `packages/shared/src/types/node-protocol.ts` | Fix platform comment |
+| `pr-body.md` | PR template for this change |

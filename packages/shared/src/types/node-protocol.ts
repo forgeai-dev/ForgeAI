@@ -1,6 +1,6 @@
 /**
  * ForgeAI Node Protocol — WebSocket binary agent protocol
- * For lightweight devices: Raspberry Pi, ESP32, NanoKVM, etc.
+ * For lightweight devices: Raspberry Pi, Jetson, BeagleBone, NanoKVM, etc.
  */
 
 // ─── Node Identity ───────────────────────────────────────
@@ -8,7 +8,7 @@
 export interface NodeInfo {
   nodeId: string;
   name: string;
-  platform: string;        // 'linux-arm64', 'linux-amd64', 'esp32', etc.
+  platform: string;        // 'linux-arm64', 'linux-amd64', 'linux-armv7', etc.
   version: string;         // agent version
   capabilities: NodeCapability[];
   tags?: string[];          // user-defined tags: 'office', 'garage', 'server-room'
