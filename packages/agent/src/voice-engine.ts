@@ -172,9 +172,31 @@ class PiperTTSAdapter implements TTSAdapter {
   }
 }
 
+/** Kokoro voice prefix → language + gender label */
+const KOKORO_PREFIX: Record<string, { lang: string; langLabel: string; gender: string }> = {
+  af: { lang: 'en-US', langLabel: 'EN', gender: 'F' },
+  am: { lang: 'en-US', langLabel: 'EN', gender: 'M' },
+  bf: { lang: 'en-GB', langLabel: 'EN-GB', gender: 'F' },
+  bm: { lang: 'en-GB', langLabel: 'EN-GB', gender: 'M' },
+  ef: { lang: 'es', langLabel: 'ES', gender: 'F' },
+  em: { lang: 'es', langLabel: 'ES', gender: 'M' },
+  ff: { lang: 'fr', langLabel: 'FR', gender: 'F' },
+  hf: { lang: 'hi', langLabel: 'HI', gender: 'F' },
+  hm: { lang: 'hi', langLabel: 'HI', gender: 'M' },
+  if: { lang: 'it', langLabel: 'IT', gender: 'F' },
+  im: { lang: 'it', langLabel: 'IT', gender: 'M' },
+  jf: { lang: 'ja', langLabel: 'JA', gender: 'F' },
+  jm: { lang: 'ja', langLabel: 'JA', gender: 'M' },
+  pf: { lang: 'pt-BR', langLabel: 'PT-BR', gender: 'F' },
+  pm: { lang: 'pt-BR', langLabel: 'PT-BR', gender: 'M' },
+  zf: { lang: 'zh', langLabel: 'ZH', gender: 'F' },
+  zm: { lang: 'zh', langLabel: 'ZH', gender: 'M' },
+};
+
 /** Kokoro TTS via VPS API — high-quality, OpenAI-compatible, CPU-only */
 class KokoroTTSAdapter implements TTSAdapter {
   readonly provider: TTSProvider = 'kokoro';
+  private cachedVoiceIds: Set<string> | null = null;
 
   private getConfig() {
     return {
@@ -188,10 +210,29 @@ class KokoroTTSAdapter implements TTSAdapter {
     return !!baseUrl && !!apiKey;
   }
 
+  private async getValidVoice(requested?: string): Promise<string> {
+    const fallback = 'pf_dora';
+    if (!requested) return fallback;
+    if (!this.cachedVoiceIds) {
+      try {
+        const voices = await this.listVoices();
+        this.cachedVoiceIds = new Set(voices.map(v => v.id));
+      } catch {
+        this.cachedVoiceIds = new Set(this.defaultVoices().map(v => v.id));
+      }
+    }
+    return this.cachedVoiceIds.has(requested) ? requested : fallback;
+  }
+
   async synthesize(request: TTSRequest): Promise<TTSResponse> {
     const start = Date.now();
     const { baseUrl, apiKey } = this.getConfig();
     if (!apiKey) throw new Error('KOKORO_API_KEY or STT_TTS_API_KEY not configured');
+
+    const voice = await this.getValidVoice(request.voice);
+    if (request.voice && request.voice !== voice) {
+      logger.warn(`Kokoro: voice '${request.voice}' not found, using '${voice}'`);
+    }
 
     const res = await fetch(`${baseUrl}/v1/audio/speech`, {
       method: 'POST',
@@ -202,7 +243,7 @@ class KokoroTTSAdapter implements TTSAdapter {
       body: JSON.stringify({
         model: 'kokoro',
         input: request.text,
-        voice: request.voice ?? 'pf_dora',
+        voice,
         speed: request.speed ?? 1.0,
         response_format: request.format ?? 'mp3',
       }),
@@ -220,28 +261,34 @@ class KokoroTTSAdapter implements TTSAdapter {
     };
   }
 
+  private parseVoice(id: string): { id: string; name: string; language: string } {
+    const prefix = id.substring(0, 2);
+    const meta = KOKORO_PREFIX[prefix];
+    const rawName = id.substring(3);
+    const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+    const isLegacy = rawName.startsWith('v0');
+    const label = isLegacy
+      ? `${displayName} [legacy] (${meta?.gender ?? '?'}, ${meta?.langLabel ?? '??'})`
+      : `${displayName} (${meta?.gender ?? '?'}, ${meta?.langLabel ?? '??'})`;
+    return { id, name: label, language: meta?.lang ?? 'en-US' };
+  }
+
   async listVoices(): Promise<{ id: string; name: string; language: string }[]> {
-    const { baseUrl } = this.getConfig();
+    const { baseUrl, apiKey } = this.getConfig();
     try {
-      const { apiKey } = this.getConfig();
       const headers: Record<string, string> = {};
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
       const res = await fetch(`${baseUrl}/v1/audio/voices`, { headers });
       if (!res.ok) return this.defaultVoices();
       const data = await res.json() as { voices: string[] };
-      return data.voices.map(v => {
-        const lang = v.startsWith('p') ? 'pt-BR'
-          : v.startsWith('e') ? 'es'
-          : v.startsWith('f') ? 'fr'
-          : v.startsWith('j') ? 'ja'
-          : v.startsWith('z') ? 'zh'
-          : v.startsWith('h') ? 'hi'
-          : v.startsWith('i') ? 'it'
-          : v.startsWith('b') ? 'en-GB'
-          : 'en-US';
-        const gender = v.includes('f_') ? 'F' : 'M';
-        return { id: v, name: `${v} (${gender})`, language: lang };
+      const voices = data.voices.map(v => this.parseVoice(v));
+      voices.sort((a, b) => {
+        const aIsPt = a.language === 'pt-BR' ? 0 : 1;
+        const bIsPt = b.language === 'pt-BR' ? 0 : 1;
+        if (aIsPt !== bIsPt) return aIsPt - bIsPt;
+        return a.name.localeCompare(b.name);
       });
+      return voices;
     } catch {
       return this.defaultVoices();
     }

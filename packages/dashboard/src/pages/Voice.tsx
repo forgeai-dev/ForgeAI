@@ -193,7 +193,19 @@ export function VoicePage() {
               <select
                 title="TTS Provider"
                 value={config?.ttsProvider ?? 'openai'}
-                onChange={(e) => saveConfig({ ttsProvider: e.target.value })}
+                onChange={async (e) => {
+                  const newProvider = e.target.value;
+                  await saveConfig({ ttsProvider: newProvider });
+                  // Reload voices for the new provider and auto-select the first one
+                  try {
+                    const vRes = await fetch('/api/voice/voices').then(r => r.json());
+                    const newVoices = vRes.voices ?? [];
+                    setVoices(newVoices);
+                    if (newVoices.length > 0) {
+                      saveConfig({ ttsVoice: newVoices[0].id });
+                    }
+                  } catch { /* ignore */ }
+                }}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
               >
                 {providers.tts.map(p => (
