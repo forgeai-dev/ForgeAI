@@ -31,7 +31,7 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${GATEWAY_PORT:-18800}:18800"
+      - "${GATEWAY_PORT:-18800}:18800"
     environment:
       # Database
       MYSQL_HOST: mysql

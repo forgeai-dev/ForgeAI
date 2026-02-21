@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply }
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
+import formbody from '@fastify/formbody';
 import {
   createLogger,
   APP_NAME,
@@ -24,7 +25,9 @@ import {
   createInputSanitizer,
   createVault,
   createAccessTokenManager,
+  createTwoFactorAuth,
   type AccessTokenManager,
+  type TwoFactorAuth,
   type JWTAuth,
   type RBACEngine,
   type RateLimiter,
@@ -61,6 +64,10 @@ export class Gateway {
   public readonly vault: Vault;
   public readonly ipFilter: IPFilter;
   public readonly accessTokenManager: AccessTokenManager;
+  public readonly twoFactor: TwoFactorAuth;
+
+  // Pending sessions: access token validated but 2FA not yet verified
+  private pendingSessions: Map<string, { createdAt: number; ip: string }> = new Map();
 
   private host: string;
   private port: number;
@@ -97,6 +104,7 @@ export class Gateway {
       maxFailedAttempts: 10,
       lockoutDuration: 900,   // 15 minutes
     });
+    this.twoFactor = createTwoFactorAuth('ForgeAI');
 
     logger.info('Gateway instance created');
   }
@@ -110,6 +118,7 @@ export class Gateway {
 
     await this.app.register(websocket);
     await this.app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
+    await this.app.register(formbody); // For HTML form POST (2FA forms)
 
     // Register routes
     this.registerHealthRoutes();
@@ -210,6 +219,7 @@ export class Gateway {
     const AUTH_EXEMPT_EXACT = new Set([
       '/health', '/info', '/auth/access',
       '/api/auth/generate-access', '/api/auth/verify',
+      '/auth/verify-totp', '/auth/setup-2fa',
       '/api/googlechat/webhook',
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
@@ -670,12 +680,21 @@ export class Gateway {
   }
 
   private registerAuthRoutes(): void {
-    // ─── Access Token Exchange: token → JWT cookie → redirect ───
+    const PENDING_TTL = 5 * 60 * 1000; // 5 min for TOTP entry after token validation
+
+    // Cleanup expired pending sessions periodically
+    setInterval(() => {
+      const now = Date.now();
+      for (const [id, s] of this.pendingSessions) {
+        if (now - s.createdAt > PENDING_TTL) this.pendingSessions.delete(id);
+      }
+    }, 60_000);
+
+    // ─── Access Token Exchange: token → pending session → TOTP form ───
     this.app.get('/auth/access', async (request: FastifyRequest, reply: FastifyReply) => {
       const query = request.query as { token?: string };
 
       if (!query.token) {
-        // Serve access page HTML
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML());
       }
@@ -694,31 +713,141 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML(result.reason));
       }
 
-      // Generate JWT session
-      const tokenPair = this.auth.generateTokenPair({
-        userId: 'admin',
-        username: 'admin',
-        role: UserRole.ADMIN,
-        sessionId: `access-${Date.now()}`,
-      });
+      // Token valid — create pending session awaiting 2FA
+      const { randomBytes } = await import('node:crypto');
+      const pendingId = randomBytes(24).toString('base64url');
+      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: request.ip });
 
       this.auditLogger.log({
         action: 'auth.access_token_used',
         ipAddress: request.ip,
-        details: { expiresAt: tokenPair.expiresAt.toISOString() },
+        details: { pendingId, awaiting2FA: true },
         success: true,
         riskLevel: 'medium',
       });
 
-      // Set HTTP-only cookie
-      reply.header('Set-Cookie',
-        `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`
-      );
+      logger.info('Access token validated, awaiting 2FA', { ip: request.ip, pendingId });
 
-      logger.info('Access token exchanged for JWT session', { ip: request.ip, expiresAt: tokenPair.expiresAt.toISOString() });
+      // Check if 2FA is set up
+      const has2FA = this.vault.isInitialized() && this.vault.listKeys().includes('system:2fa_secret');
 
-      // Redirect to dashboard
-      reply.redirect('/dashboard');
+      if (!has2FA) {
+        // First-time setup: generate secret + QR code
+        const setup = this.twoFactor.generateSetup('admin');
+        // Store secret temporarily in pending session for confirmation
+        (this.pendingSessions.get(pendingId) as any).setupSecret = setup.secret;
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, setup.qrCodeUrl));
+      }
+
+      // 2FA already configured — show TOTP form
+      reply.header('Content-Type', 'text/html');
+      return reply.send(this.getTOTPFormHTML(pendingId));
+    });
+
+    // ─── First-time 2FA Setup: confirm TOTP code + save secret ───
+    this.app.post('/auth/setup-2fa', async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = request.body as { pendingId?: string; code?: string };
+      if (!body.pendingId || !body.code) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing pending session or code'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId) as any;
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      const setupSecret = pending.setupSecret;
+      if (!setupSecret) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid setup session'));
+      }
+
+      // Verify the TOTP code against the setup secret
+      const isValid = this.twoFactor.verify(body.code.trim(), setupSecret);
+      if (!isValid) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'setup_confirmation' },
+          success: false,
+          riskLevel: 'high',
+        });
+        // Show setup page again with error (reuse same secret)
+        const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
+        const qrCodeUrl = `https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=${encodeURIComponent(otpauthUrl)}`;
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrCodeUrl, 'Invalid code. Try again.'));
+      }
+
+      // Save 2FA secret to Vault permanently
+      if (this.vault.isInitialized()) {
+        this.vault.set('system:2fa_secret', setupSecret);
+        logger.info('2FA setup completed — secret saved to Vault');
+      }
+
+      this.auditLogger.log({
+        action: 'auth.2fa_verified',
+        ipAddress: request.ip,
+        details: { type: 'first_setup' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Issue JWT
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
+    });
+
+    // ─── Verify TOTP code (subsequent logins) ───
+    this.app.post('/auth/verify-totp', async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = request.body as { pendingId?: string; code?: string };
+      if (!body.pendingId || !body.code) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing pending session or code'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId);
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // Get 2FA secret from Vault
+      const secret = this.vault.isInitialized() ? this.vault.get('system:2fa_secret') : undefined;
+      if (!secret) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('2FA not configured. Contact admin.'));
+      }
+
+      const isValid = this.twoFactor.verify(body.code.trim(), secret);
+      if (!isValid) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'login' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid code. Try again.'));
+      }
+
+      this.auditLogger.log({
+        action: 'auth.2fa_verified',
+        ipAddress: request.ip,
+        details: { type: 'login' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Issue JWT
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
     });
 
     // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
@@ -816,6 +945,137 @@ export class Gateway {
       });
       return { success: true, revokedAccessTokens: count };
     });
+  }
+
+  /**
+   * Issue JWT cookie and redirect to dashboard.
+   */
+  private issueJWTAndRedirect(reply: FastifyReply, ip: string): void {
+    const tokenPair = this.auth.generateTokenPair({
+      userId: 'admin',
+      username: 'admin',
+      role: UserRole.ADMIN,
+      sessionId: `access-${Date.now()}`,
+    });
+
+    reply.header('Set-Cookie',
+      `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`
+    );
+
+    logger.info('JWT session issued after 2FA', { ip, expiresAt: tokenPair.expiresAt.toISOString() });
+    reply.redirect('/dashboard');
+  }
+
+  /**
+   * TOTP verification form HTML (for subsequent logins).
+   */
+  private getTOTPFormHTML(pendingId: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${error}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Two-Factor Authentication</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 420px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 48px 36px; }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+    form { display: flex; flex-direction: column; gap: 16px; }
+    input[type="text"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 24px; text-align: center; letter-spacing: 8px; font-family: 'Fira Code', monospace; outline: none; }
+    input[type="text"]:focus { border-color: #ff6b35; }
+    button { background: #ff6b35; color: #fff; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #e55a2b; }
+    .footer { color: #555; font-size: 12px; margin-top: 24px; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">🔐</div>
+    <h1>Two-Factor Authentication</h1>
+    <p class="subtitle">Enter the 6-digit code from your authenticator app</p>
+    ${errorBlock}
+    <form method="POST" action="/auth/verify-totp">
+      <input type="hidden" name="pendingId" value="${pendingId}">
+      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <button type="submit">Verify</button>
+    </form>
+    <p class="footer">Code refreshes every 30 seconds</p>
+  </div>
+</body></html>`;
+  }
+
+  /**
+   * 2FA first-time setup HTML (QR code + confirmation).
+   */
+  private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${error}</div>`
+      : '';
+
+    // Extract secret from otpauth URL for manual entry
+    const secretMatch = otpauthUrl.match(/secret=([A-Z2-7]+)/i);
+    const secret = secretMatch ? secretMatch[1] : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Setup Two-Factor Authentication</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 480px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 40px 32px; }
+    .logo { font-size: 48px; margin-bottom: 12px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: #fff; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+    .qr-section { background: #fff; border-radius: 12px; padding: 16px; display: inline-block; margin-bottom: 20px; }
+    .qr-section img { display: block; }
+    .manual-key { background: #111; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; margin-bottom: 20px; }
+    .manual-key label { display: block; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .manual-key code { font-family: 'Fira Code', monospace; font-size: 14px; color: #4ade80; letter-spacing: 2px; word-break: break-all; }
+    .steps { text-align: left; margin-bottom: 20px; }
+    .steps p { color: #999; font-size: 13px; margin-bottom: 6px; line-height: 1.5; }
+    .steps strong { color: #ccc; }
+    form { display: flex; flex-direction: column; gap: 14px; }
+    input[type="text"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 24px; text-align: center; letter-spacing: 8px; font-family: 'Fira Code', monospace; outline: none; }
+    input[type="text"]:focus { border-color: #ff6b35; }
+    button { background: #ff6b35; color: #fff; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #e55a2b; }
+    .footer { color: #555; font-size: 11px; margin-top: 20px; }
+    hr { border: none; border-top: 1px solid #2a2a2a; margin: 16px 0; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">🔐</div>
+    <h1>Setup Two-Factor Authentication</h1>
+    <p class="subtitle">Scan the QR code with Google Authenticator, Authy, or any TOTP app</p>
+    ${errorBlock}
+    <div class="qr-section">
+      <img src="${qrCodeUrl}" alt="QR Code" width="200" height="200">
+    </div>
+    <div class="manual-key">
+      <label>Manual entry key</label>
+      <code>${secret}</code>
+    </div>
+    <div class="steps">
+      <p><strong>1.</strong> Open your authenticator app</p>
+      <p><strong>2.</strong> Scan the QR code or enter the key manually</p>
+      <p><strong>3.</strong> Enter the 6-digit code below to confirm</p>
+    </div>
+    <hr>
+    <form method="POST" action="/auth/setup-2fa">
+      <input type="hidden" name="pendingId" value="${pendingId}">
+      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <button type="submit">Confirm & Activate 2FA</button>
+    </form>
+    <p class="footer">Save this key securely — you'll need it if you lose your device</p>
+  </div>
+</body></html>`;
   }
 
   /**
