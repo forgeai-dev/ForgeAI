@@ -1,5 +1,5 @@
 # ─── Stage 1: Build ──────────────────────────────────
-FROM node:22-slim AS builder
+FROM node:25-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -43,7 +43,7 @@ RUN pnpm --filter @forgeai/shared build && \
 RUN pnpm --filter @forgeai/dashboard build
 
 # ─── Stage 2: Production ─────────────────────────────
-FROM node:22-slim AS production
+FROM node:25-slim AS production
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
