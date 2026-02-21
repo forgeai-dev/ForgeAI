@@ -721,10 +721,12 @@ export class Gateway {
       reply.redirect('/dashboard');
     });
 
-    // ─── Generate Access Token (localhost-only OR via Vault secret) ───
+    // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
     this.app.post('/api/auth/generate-access', async (request: FastifyRequest, reply: FastifyReply) => {
       const ip = request.ip;
-      const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost';
+      const rawIp = ip.replace('::ffff:', '');
+      const isLocalhost = rawIp === '127.0.0.1' || ip === '::1' || ip === 'localhost'
+        || rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.');
 
       // Check for master secret in header (for remote generation via SSH tunnel)
       const masterSecret = request.headers['x-forgeai-secret'] as string | undefined;
@@ -797,7 +799,9 @@ export class Gateway {
     // ─── Revoke all tokens (emergency) ───
     this.app.post('/api/auth/revoke-all', async (request: FastifyRequest, reply: FastifyReply) => {
       const ip = request.ip;
-      const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+      const rIp = ip.replace('::ffff:', '');
+      const isLocalhost = rIp === '127.0.0.1' || ip === '::1' || ip === 'localhost'
+        || rIp.startsWith('172.') || rIp.startsWith('10.') || rIp.startsWith('192.168.');
       if (!isLocalhost) {
         reply.status(403).send({ error: 'Only available from localhost' });
         return;
