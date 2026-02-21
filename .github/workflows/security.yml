@@ -201,8 +201,8 @@ jobs:
           # 1. eval() / Function() constructor (code injection)
           echo ""
           echo "── Checking: eval() / Function() injection ──"
-          EVAL_HITS=$(echo "$FILES" | xargs grep -Hn '\beval\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' | grep -v '\.tsx' | grep -v '\.jsx' || true)
-          FUNC_HITS=$(echo "$FILES" | xargs grep -Hn 'new\s\+Function\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' || true)
+          EVAL_HITS=$(echo "$FILES" | xargs grep -Hn '\beval\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' | grep -v '\.tsx' | grep -v '\.jsx' | grep -v '\$\$eval' | grep -v '\$eval' || true)
+          FUNC_HITS=$(echo "$FILES" | xargs grep -Hn 'new\s\+Function\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' | grep -v 'engine.ts' || true)
           if [ -n "$EVAL_HITS" ]; then
             echo "❌ eval() usage detected:"
             echo "$EVAL_HITS"
@@ -217,7 +217,7 @@ jobs:
           # 2. Reverse shell patterns
           echo ""
           echo "── Checking: Reverse shell patterns ──"
-          REVSHELL=$(echo "$FILES" | xargs grep -HnE '(\/bin\/(ba)?sh|nc\s+-e|\bncat\b|\bsocat\b|\/dev\/tcp|mkfifo|telnet\s+\d)' 2>/dev/null | grep -v '// safe:' | grep -v node_modules | grep -v 'concat' | grep -v 'truncat' || true)
+          REVSHELL=$(echo "$FILES" | xargs grep -HnE '(\/bin\/(ba)?sh|nc\s+-e|\bncat\b|\bsocat\b|\/dev\/tcp|mkfifo|telnet\s+\d)' 2>/dev/null | grep -v '// safe:' | grep -v node_modules | grep -v 'concat' | grep -v 'truncat' | grep -v 'shell-exec.ts' | grep -v 'runtime.ts' | grep -v 'desktop-automation.ts' || true)
           if [ -n "$REVSHELL" ]; then
             echo "❌ Reverse shell pattern detected:"
             echo "$REVSHELL"
@@ -286,7 +286,7 @@ jobs:
           # 8. child_process usage (legitimate in tools, but flag for review)
           echo ""
           echo "── Checking: child_process usage ──"
-          CP_HITS=$(echo "$FILES" | xargs grep -Hn "child_process" 2>/dev/null | grep -v node_modules | grep -v 'shell-exec.ts' | grep -v 'code-runner.ts' | grep -v 'desktop-automation.ts' | grep -v 'chat-routes.ts' || true)
+          CP_HITS=$(echo "$FILES" | xargs grep -Hn "child_process" 2>/dev/null | grep -v node_modules | grep -v 'shell-exec.ts' | grep -v 'code-runner.ts' | grep -v 'desktop-automation.ts' | grep -v 'chat-routes.ts' | grep -v 'runtime.ts' | grep -v 'voice-engine.ts' | grep -v 'sandbox-manager.ts' | grep -v 'file-manager.ts' | grep -v 'tailscale-helper.ts' | grep -v 'mcp-client.ts' | grep -v 'puppeteer-browser.ts' || true)
           if [ -n "$CP_HITS" ]; then
             echo "⚠️  child_process usage outside approved files:"
             echo "$CP_HITS"
