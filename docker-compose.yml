@@ -10,7 +10,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-forgeai_secret}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-forgeai}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -31,7 +31,7 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "${GATEWAY_PORT:-18800}:18800"
+      - "127.0.0.1:${GATEWAY_PORT:-18800}:18800"
     environment:
       # Database
       MYSQL_HOST: mysql
