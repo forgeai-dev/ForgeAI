@@ -100,4 +100,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:18800/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 # Start gateway
-CMD ["node", "packages/cli/dist/index.js", "start"]
+CMD ["node", "packages/cli/dist/index.js", "start", "--migrate"]
