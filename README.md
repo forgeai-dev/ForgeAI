@@ -798,6 +798,8 @@ pnpm test    # 38 E2E tests
 
 <div align="center">
 
-**[MIT License](./LICENSE)** · Built with TypeScript · Made for developers who value privacy
+**[MIT License](./LICENSE)** · **[Security Policy](./SECURITY.md)** · **[Code of Conduct](./CODE_OF_CONDUCT.md)** · **[Contributing](./CONTRIBUTING.md)**
+
+Built with TypeScript · Made for developers who value privacy
 
 </div>

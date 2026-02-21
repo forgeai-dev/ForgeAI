@@ -1,0 +1,28 @@
+# ─── ForgeAI Code Owners ─────────────────────────────
+# These owners will be automatically requested for review
+# when someone opens a pull request that modifies code they own.
+#
+# Order matters: later rules take precedence over earlier ones.
+
+# ─── Default: core maintainer reviews everything ─────
+*                                   @diegofelipeee
+
+# ─── Core gateway & API ─────────────────────────────
+packages/core/                      @diegofelipeee
+packages/cli/                       @diegofelipeee
+
+# ─── Dashboard (React frontend) ─────────────────────
+packages/dashboard/                 @diegofelipeee
+
+# ─── Desktop app (Electron) ─────────────────────────
+packages/desktop/                   @diegofelipeee
+
+# ─── Security-sensitive files ────────────────────────
+.github/workflows/security.yml      @diegofelipeee
+.github/workflows/ci.yml            @diegofelipeee
+.gitleaks.toml                       @diegofelipeee
+SECURITY.md                          @diegofelipeee
+
+# ─── Dependencies ───────────────────────────────────
+pnpm-lock.yaml                      @diegofelipeee
+**/package.json                     @diegofelipeee

@@ -1,0 +1,71 @@
+# Dependabot configuration for ForgeAI
+# Automatically creates PRs to update vulnerable or outdated dependencies
+# https://docs.github.com/en/code-security/dependabot
+
+version: 2
+
+updates:
+  # ─── npm (pnpm) dependencies ──────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "diegofelipeee"
+    labels:
+      - "dependencies"
+      - "automated"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group minor/patch updates to reduce PR noise
+    groups:
+      production-deps:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+
+  # ─── GitHub Actions ───────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "diegofelipeee"
+    labels:
+      - "ci"
+      - "automated"
+    commit-message:
+      prefix: "ci"
+
+  # ─── Docker ───────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "diegofelipeee"
+    labels:
+      - "docker"
+      - "automated"
+    commit-message:
+      prefix: "docker"
