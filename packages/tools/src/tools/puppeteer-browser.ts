@@ -60,30 +60,45 @@ export class PuppeteerBrowserTool extends BaseTool {
       }
       this.currentProfile = targetProfile;
 
+      const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-blink-features=AutomationControlled',
+        `--user-agent=${STEALTH_UA}`,
+        '--lang=pt-BR,pt,en-US,en',
+      ];
+
+      // Try Puppeteer bundled Chrome first
       try {
         this.browser = await puppeteer.launch({
           headless: 'shell',
           userDataDir: profileDir,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-blink-features=AutomationControlled',
-            `--user-agent=${STEALTH_UA}`,
-            '--lang=pt-BR,pt,en-US,en',
-          ],
+          args: launchArgs,
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('Could not find Chrome') || msg.includes('Failed to launch') || msg.includes('ENOENT')) {
-          throw new Error(
-            'Chrome/Chromium is not installed. Run "npx puppeteer browsers install chrome" to install it, or use the web_browse tool (HTTP-only, no JS) as a fallback.'
-          );
+          // Fallback: try system Chrome paths
+          const systemChrome = this.findSystemChrome();
+          if (systemChrome) {
+            this.browser = await puppeteer.launch({
+              headless: 'shell',
+              executablePath: systemChrome,
+              userDataDir: profileDir,
+              args: launchArgs,
+            });
+          } else {
+            throw new Error(
+              'Chrome/Chromium is not installed. Run "npx puppeteer browsers install chrome" to install it, or use the web_browse tool (HTTP-only, no JS) as a fallback.'
+            );
+          }
+        } else {
+          throw err;
         }
-        throw err;
       }
     }
 
@@ -108,6 +123,33 @@ export class PuppeteerBrowserTool extends BaseTool {
     });
     await page.setViewport({ width: 1280, height: 720 });
     return { browser: this.browser, page };
+  }
+
+  private findSystemChrome(): string | null {
+    const candidates: string[] = process.platform === 'win32'
+      ? [
+          resolve(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          resolve(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          resolve(process.env['LOCALAPPDATA'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          resolve(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Chromium', 'Application', 'chrome.exe'),
+        ]
+      : process.platform === 'darwin'
+        ? [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+          ]
+        : [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/snap/bin/chromium',
+          ];
+
+    for (const path of candidates) {
+      if (path && existsSync(path)) return path;
+    }
+    return null;
   }
 
   private isBlockedUrl(url: string): boolean {
