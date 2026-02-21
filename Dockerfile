@@ -19,6 +19,7 @@ COPY packages/plugins/package.json packages/plugins/
 COPY packages/workflows/package.json packages/workflows/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
+COPY packages/desktop/package.json packages/desktop/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile --ignore-scripts
@@ -68,6 +69,7 @@ COPY packages/plugins/package.json packages/plugins/
 COPY packages/workflows/package.json packages/workflows/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
+COPY packages/desktop/package.json packages/desktop/
 
 # Install production dependencies only
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts

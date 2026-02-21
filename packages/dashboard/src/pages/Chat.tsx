@@ -117,8 +117,7 @@ function renderInline(text: string): React.ReactNode[] {
           key={`img-${match.index}`}
           src={src}
           alt={alt}
-          className="max-w-full rounded-lg border border-zinc-700/50 my-2 cursor-pointer hover:opacity-90 transition-opacity"
-          style={{ maxHeight: '400px' }}
+          className="max-w-full max-h-[400px] rounded-lg border border-zinc-700/50 my-2 cursor-pointer hover:opacity-90 transition-opacity"
           onClick={() => window.open(src, '_blank')}
         />
       );

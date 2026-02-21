@@ -170,7 +170,7 @@ function TimelinePlayer({ recording }: { recording: FullRecording }) {
         <button onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play'} className="p-2 rounded-lg bg-forge-500 hover:bg-forge-600 text-white transition-colors">
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
         </button>
-        <button onClick={reset} className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
+        <button onClick={reset} title="Reset" className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
           <RotateCcw className="w-4 h-4" />
         </button>
 
