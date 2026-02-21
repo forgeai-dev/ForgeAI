@@ -105,11 +105,11 @@
 
 > ✅ **Já implementados:** GitHub integration (Fase 14), RSS/Atom feeds (Fase 14), Gmail (Fase 20), Calendar (Fase 22), Notion (Fase 22)
 
-### 🔴 Segurança & Compliance (2 restantes)
+### 🔴 Segurança & Compliance (0 restantes) ✅ COMPLETO
 | Feature | Descrição | Complexidade |
 |---------|-----------|-------------|
-| Data encryption at rest | Criptografia do DB inteiro (MySQL TDE ou app-level) | Alta |
-| Session recording & replay | Gravar e reproduzir sessões para debug/audit | Alta |
+| ~~Data encryption at rest~~ | ~~Criptografia do DB inteiro~~ | 📌 Nice-to-have futuro (Vault já cobre secrets) |
+| ~~Session recording & replay~~ | ~~Gravar e reproduzir sessões para debug/audit~~ | ✅ Done |
 
 > ✅ **Já implementados:** OAuth2/SSO Google/GitHub/Microsoft (Fase 13), GDPR export/delete (Fase 14), IP allowlist/blocklist (Fase 12), API Key Management 12 scopes (Fase 14)
 
@@ -120,9 +120,9 @@ Agent Avançado:  0 restantes ✅ COMPLETO
 Infraestrutura:  2 restantes (Log aggregation, DB migrations auto)
 Apps Nativas:    3 restantes (Electron, React Native, Voice Wake)
 Integrações:     1 restante (Spotify/HA)
-Segurança:       2 restantes (DB encryption, Session replay)
+Segurança:       0 restantes ✅ COMPLETO (DB encryption → nice-to-have)
 ────────────────────────────────────────
-Total:          14 features restantes (de 37 originais — 62% concluído!)
+Total:          12 features restantes (de 37 originais — 68% concluído!)
 ```
 
 ### Priorização Sugerida — Próximas Fases

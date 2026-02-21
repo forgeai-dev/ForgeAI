@@ -20,6 +20,7 @@ import { ChatHistoryStore, createChatHistoryStore, type StoredMessage } from '..
 import { loadWorkspacePrompts, getWorkspacePromptFiles } from '@forgeai/agent';
 import { createOTelManager, type OTelManager } from '../telemetry/otel-manager.js';
 import { createArtifactManager, type ArtifactManager } from '../artifact/artifact-manager.js';
+import { createSessionRecorder, type SessionRecorder } from '../recording/session-recorder.js';
 
 const logger = createLogger('Core:ChatRoutes');
 
@@ -59,6 +60,7 @@ let pairingManager: PairingManager | null = null;
 let nodeChannel: NodeChannel | null = null;
 let wakeWordManager: WakeWordManager | null = null;
 let artifactManager: ArtifactManager | null = null;
+let sessionRecorder: SessionRecorder | null = null;
 
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
@@ -1216,8 +1218,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       // Register WS progress listener for real-time streaming
       const wsBroadcaster = getWSBroadcaster();
       const targetAgent = body.agentId ? agentManager.getAgent(body.agentId) : agentManager.getDefaultAgent();
+      const isBeingRecorded = sessionRecorder?.isRecording(sessionId) ?? false;
+
+      // Record user message if recording
+      if (isBeingRecorded) {
+        sessionRecorder!.recordMessage(sessionId, 'user', body.message);
+      }
+
       const progressListener = (event: Record<string, unknown>) => {
         wsBroadcaster.broadcastToSession(sessionId, { ...event, type: `agent.${event.type}` });
+
+        // Record agent events if session is being recorded
+        if (isBeingRecorded) {
+          const evType = event.type as string;
+          if (evType === 'step') {
+            const step = event.step as { type: string; tool?: string; args?: Record<string, unknown>; result?: string; success?: boolean; duration?: number; message?: string } | undefined;
+            if (step) {
+              sessionRecorder!.recordStep(sessionId, step.type, { tool: step.tool, args: step.args, result: step.result?.substring(0, 2000), success: step.success, duration: step.duration, message: step.message });
+            }
+          } else if (evType === 'progress') {
+            sessionRecorder!.recordProgress(sessionId, event.progress as Record<string, unknown> ?? {});
+          }
+        }
       };
       if (targetAgent) {
         targetAgent.onProgress(sessionId, progressListener as any);
@@ -2726,6 +2748,86 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     if (!body.action) { reply.status(400).send({ error: 'action is required' }); return; }
     artifactManager.handleInteraction(id, body.action, body.data);
     return { received: true };
+  });
+
+  // ─── Session Recording & Replay ──────────────────────────────
+
+  sessionRecorder = createSessionRecorder();
+
+  // Wire recording events to WebSocket broadcaster
+  sessionRecorder.onEvent((event, recording) => {
+    const wsBroadcaster = getWSBroadcaster();
+    wsBroadcaster.broadcastAll({
+      type: 'recording',
+      event,
+      recordingId: recording.id,
+      sessionId: recording.sessionId,
+      status: recording.status,
+      timestamp: Date.now(),
+    });
+  });
+
+  logger.info('Session recorder initialized');
+
+  // GET /api/recordings — list all recordings
+  app.get('/api/recordings', async () => {
+    if (!sessionRecorder) return { recordings: [], count: 0 };
+    const recordings = await sessionRecorder.listRecordings();
+    return { recordings, count: recordings.length };
+  });
+
+  // GET /api/recordings/:id — get a full recording with timeline
+  app.get('/api/recordings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!sessionRecorder) { reply.status(503).send({ error: 'Session recorder not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const recording = await sessionRecorder.getRecording(id);
+    if (!recording) { reply.status(404).send({ error: 'Recording not found' }); return; }
+    return { recording };
+  });
+
+  // POST /api/recordings/start — start recording a session
+  app.post('/api/recordings/start', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!sessionRecorder) { reply.status(503).send({ error: 'Session recorder not ready' }); return; }
+    const body = request.body as { sessionId: string; title?: string; channelType?: string; agentId?: string };
+    if (!body.sessionId) { reply.status(400).send({ error: 'sessionId is required' }); return; }
+    if (sessionRecorder.isRecording(body.sessionId)) {
+      return { recording: sessionRecorder.getActive(body.sessionId), alreadyRecording: true };
+    }
+    const recording = sessionRecorder.startRecording({
+      sessionId: body.sessionId,
+      title: body.title,
+      channelType: body.channelType,
+      agentId: body.agentId,
+    });
+    return { recording };
+  });
+
+  // POST /api/recordings/stop — stop recording a session
+  app.post('/api/recordings/stop', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!sessionRecorder) { reply.status(503).send({ error: 'Session recorder not ready' }); return; }
+    const body = request.body as { sessionId: string };
+    if (!body.sessionId) { reply.status(400).send({ error: 'sessionId is required' }); return; }
+    const recording = await sessionRecorder.stopRecording(body.sessionId);
+    if (!recording) { reply.status(404).send({ error: 'No active recording for this session' }); return; }
+    return { recording };
+  });
+
+  // GET /api/recordings/active — get all sessions currently being recorded
+  app.get('/api/recordings/active', async () => {
+    if (!sessionRecorder) return { sessions: [] };
+    // Return list of session IDs being recorded
+    const recordings = await sessionRecorder.listRecordings();
+    const activeRecordings = recordings.filter(r => r.status === 'recording');
+    return { recordings: activeRecordings, count: activeRecordings.length };
+  });
+
+  // DELETE /api/recordings/:id — delete a recording
+  app.delete('/api/recordings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!sessionRecorder) { reply.status(503).send({ error: 'Session recorder not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const deleted = await sessionRecorder.deleteRecording(id);
+    if (!deleted) { reply.status(404).send({ error: 'Recording not found' }); return; }
+    return { deleted: true };
   });
 
   // ─── Language Setting ──────────────────────────────

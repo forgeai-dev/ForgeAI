@@ -19,6 +19,7 @@ import { CalendarPage } from './pages/Calendar';
 import { VoicePage } from './pages/Voice';
 import { RAGPage } from './pages/RAG';
 import { CanvasPage } from './pages/Canvas';
+import { RecordingsPage } from './pages/Recordings';
 
 export function App() {
   return (
@@ -43,6 +44,7 @@ export function App() {
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/rag" element={<RAGPage />} />
         <Route path="/canvas" element={<CanvasPage />} />
+        <Route path="/recordings" element={<RecordingsPage />} />
       </Route>
     </Routes>
     </I18nProvider>

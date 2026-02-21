@@ -14,7 +14,7 @@
 
 <br />
 
-| 8 Channels | 10 LLM Providers | 13 Tools | 18 Dashboard Pages | 150+ API Endpoints | 7 Security Modules |
+| 8 Channels | 10 LLM Providers | 13 Tools | 19 Dashboard Pages | 150+ API Endpoints | 7 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
@@ -242,6 +242,7 @@ The dashboard is a full-featured React 19 SPA served directly by the Gateway. No
 | **RAG** | Document upload (PDF/TXT/MD/code), semantic search with score display, config editor (chunk size, embedding provider), persistence |
 | **Voice** | Text-to-Speech (OpenAI TTS) and Speech-to-Text (Whisper), voice input/output for agent interactions |
 | **Canvas** | ForgeCanvas: live visual artifacts (HTML, React, SVG, Mermaid, Charts, Markdown, Code) rendered in sandboxed iframes with bidirectional agent↔artifact interaction |
+| **Recordings** | Session Recording & Replay: record full agent sessions, timeline player with play/pause/scrub, step-by-step visualization (messages, tool calls, thinking, progress) |
 
 ---
 

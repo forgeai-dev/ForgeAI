@@ -16,3 +16,4 @@ export { setPairingRef } from './gateway/chat-commands.js';
 export { OTelManager, createOTelManager, getOTelManager } from './telemetry/otel-manager.js';
 export type { OTelConfig, SpanData, MetricPoint } from './telemetry/otel-manager.js';
 export { ArtifactManager, createArtifactManager } from './artifact/artifact-manager.js';
+export { SessionRecorder, createSessionRecorder } from './recording/session-recorder.js';
