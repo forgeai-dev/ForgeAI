@@ -70,6 +70,11 @@ export class Gateway {
   // Pending sessions: access token validated but 2FA not yet verified
   private pendingSessions: Map<string, { createdAt: number; ip: string }> = new Map();
 
+  // Rate limiter for auth endpoints (brute-force protection)
+  private authAttempts: Map<string, { count: number; firstAttempt: number }> = new Map();
+  private static readonly AUTH_RATE_LIMIT = 5; // max attempts
+  private static readonly AUTH_RATE_WINDOW = 60_000; // 1 minute window
+
   private host: string;
   private port: number;
 
@@ -748,6 +753,14 @@ export class Gateway {
 
     // ─── First-time 2FA Setup: confirm TOTP code + Admin PIN + save secret ───
     this.app.post('/auth/setup-2fa', async (request: FastifyRequest, reply: FastifyReply) => {
+      // Rate limit auth attempts (brute-force protection)
+      const clientIp = request.socket.remoteAddress || 'unknown';
+      if (this.isAuthRateLimited(clientIp)) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+      this.recordAuthAttempt(clientIp);
+
       const body = request.body as { pendingId?: string; code?: string; pin?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
@@ -820,6 +833,14 @@ export class Gateway {
 
     // ─── Verify TOTP code + Admin PIN (subsequent logins) ───
     this.app.post('/auth/verify-totp', async (request: FastifyRequest, reply: FastifyReply) => {
+      // Rate limit auth attempts (brute-force protection)
+      const clientIp = request.socket.remoteAddress || 'unknown';
+      if (this.isAuthRateLimited(clientIp)) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+      this.recordAuthAttempt(clientIp);
+
       const body = request.body as { pendingId?: string; code?: string; pin?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
@@ -1003,7 +1024,7 @@ export class Gateway {
    */
   private getTOTPFormHTML(pendingId: string, error?: string): string {
     const errorBlock = error
-      ? `<div class="error">${error}</div>`
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
 
     return `<!DOCTYPE html>
@@ -1032,7 +1053,7 @@ export class Gateway {
     <p class="subtitle">Enter the 6-digit code from your authenticator app</p>
     ${errorBlock}
     <form method="POST" action="/auth/verify-totp">
-      <input type="hidden" name="pendingId" value="${pendingId}">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
       <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Verify</button>
@@ -1047,7 +1068,7 @@ export class Gateway {
    */
   private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string): string {
     const errorBlock = error
-      ? `<div class="error">${error}</div>`
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
 
     // Extract secret from otpauth URL for manual entry
@@ -1102,7 +1123,7 @@ export class Gateway {
     </div>
     <hr>
     <form method="POST" action="/auth/setup-2fa">
-      <input type="hidden" name="pendingId" value="${pendingId}">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
       <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Confirm & Activate 2FA</button>
@@ -1113,23 +1134,69 @@ export class Gateway {
   }
 
   /**
+   * HTML-escape a string to prevent XSS in rendered HTML.
+   */
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Check if an IP has exceeded the auth rate limit.
+   */
+  private isAuthRateLimited(ip: string): boolean {
+    const entry = this.authAttempts.get(ip);
+    if (!entry) return false;
+    if (Date.now() - entry.firstAttempt > Gateway.AUTH_RATE_WINDOW) {
+      this.authAttempts.delete(ip);
+      return false;
+    }
+    return entry.count >= Gateway.AUTH_RATE_LIMIT;
+  }
+
+  /**
+   * Record an auth attempt for rate limiting.
+   */
+  private recordAuthAttempt(ip: string): void {
+    const entry = this.authAttempts.get(ip);
+    if (!entry || Date.now() - entry.firstAttempt > Gateway.AUTH_RATE_WINDOW) {
+      this.authAttempts.set(ip, { count: 1, firstAttempt: Date.now() });
+    } else {
+      entry.count++;
+    }
+  }
+
+  /**
    * Extract JWT from cookie or Authorization header.
    */
   private extractJWT(request: FastifyRequest): string | null {
+    let token: string | null = null;
+
     // Check cookie first
     const cookieHeader = request.headers.cookie;
     if (cookieHeader) {
       const match = cookieHeader.match(/forgeai_session=([^;]+)/);
-      if (match) return match[1];
+      if (match) token = match[1];
     }
 
     // Check Authorization header
-    const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      return authHeader.slice(7);
+    if (!token) {
+      const authHeader = request.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+      }
     }
 
-    return null;
+    // Validate token format: must be a valid JWT (3 base64url segments)
+    if (token && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+      return null; // Reject malformed tokens before they reach verifyAccessToken
+    }
+
+    return token;
   }
 
   /**
