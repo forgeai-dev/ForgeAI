@@ -1016,7 +1016,7 @@ export class Gateway {
     );
 
     logger.info('JWT session issued after 2FA', { ip, expiresAt: tokenPair.expiresAt.toISOString() });
-    reply.redirect('/dashboard');
+    reply.redirect('/');
   }
 
   /**
