@@ -25,14 +25,23 @@ export const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 export const DANGEROUS_COMMANDS = [
   'rm -rf /',
   'rm -rf /*',
+  'rm -rf --no-preserve-root',
   ':(){:|:&};:',
   'dd if=/dev/zero of=/dev/sd',
+  'dd if=/dev/zero of=/dev/nvme',
   'format c:',
   'del /f /s /q c:\\windows\\system32',
   'rd /s /q c:\\windows\\system32',
   'rd /s /q c:\\',
+  'rd /s /q c:\\windows',
+  'rd /s /q c:\\users',
   'bcdedit /delete',
+  'diskpart',
+  'reg delete hklm\\system',
+  'reg delete hklm\\software',
   'mimikatz',
+  'lazagne',
+  'kill -9 -1',
 ];
 
 export const PROMPT_INJECTION_PATTERNS = [

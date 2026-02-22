@@ -234,16 +234,57 @@ export class Gateway {
       '/assets/',                 // Static dashboard assets (JS/CSS)
     ];
 
-    // Check if auth is enabled (default: enabled when GATEWAY_AUTH=true or on non-localhost)
-    const authEnabled = process.env['GATEWAY_AUTH'] !== 'false';
+    // ─── Smart Security: localhost vs external detection ───
+    // GATEWAY_AUTH=false  → auth disabled entirely (dev only)
+    // GATEWAY_AUTH=true   → auth always enforced (production)
+    // GATEWAY_AUTH unset  → smart: skip auth ONLY for true localhost, enforce for everything else
+    //
+    // Security guarantees:
+    // 1. remoteAddress comes from the OS TCP socket — cannot be spoofed over network
+    // 2. If proxy headers (X-Forwarded-For, X-Real-IP) are present, treat as EXTERNAL
+    //    even if socket says 127.0.0.1 (reverse proxy scenario)
+    // 3. Smart mode only activates when binding to 127.0.0.1 (not 0.0.0.0)
+    //    because 0.0.0.0 accepts connections from any interface
+    // 4. trustProxy is OFF — Fastify uses raw socket IP, not headers
+    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+    const authSetting = process.env['GATEWAY_AUTH'];
 
-    if (authEnabled) {
+    // Only enable smart bypass when binding to loopback interface specifically
+    // 0.0.0.0 binds ALL interfaces (including external NICs) — NOT safe for open bypass
+    const isStrictlyLocalBinding = LOCALHOST_IPS.has(this.host);
+
+    const isTrueLocalRequest = (request: FastifyRequest): boolean => {
+      const socketIp = request.socket.remoteAddress || '';
+
+      // Check 1: socket-level IP must be loopback
+      if (!LOCALHOST_IPS.has(socketIp)) return false;
+
+      // Check 2: if proxy headers exist, someone is proxying — treat as external
+      // A real local browser request (curl, Chrome on same machine) never sends these
+      const forwarded = request.headers['x-forwarded-for']
+        || request.headers['x-real-ip']
+        || request.headers['forwarded'];
+      if (forwarded) return false;
+
+      return true;
+    };
+
+    if (authSetting === 'false') {
+      logger.warn('⚠️ Authentication middleware DISABLED (GATEWAY_AUTH=false)');
+    } else {
+      const authMode = authSetting === 'true' ? 'always' : 'smart';
       this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
         const path = request.url.split('?')[0];
 
         // Skip auth for exempt paths
         if (AUTH_EXEMPT_EXACT.has(path)) return;
         if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
+
+        // Smart mode: skip auth ONLY for true localhost connections
+        // Both conditions must be true: server bound to loopback AND request from loopback
+        if (authMode === 'smart' && isStrictlyLocalBinding && isTrueLocalRequest(request)) {
+          return; // Verified localhost — no auth needed
+        }
 
         // Check JWT from cookie or Authorization header
         const jwt = this.extractJWT(request);
@@ -259,16 +300,20 @@ export class Gateway {
 
         // Not authenticated — block
         if (path.startsWith('/api/')) {
-          // API calls get 401 JSON
           reply.status(401).send({ error: 'Authentication required', authUrl: '/auth/access' });
         } else {
-          // Page requests get redirected to access page
           reply.redirect('/auth/access');
         }
       });
-      logger.info('🔒 Authentication middleware enabled (access token system)');
-    } else {
-      logger.warn('⚠️ Authentication middleware DISABLED (GATEWAY_AUTH=false)');
+
+      if (authMode === 'smart') {
+        logger.info(`🔒 Smart auth: localhost=open (binding ${this.host}), external=strict`);
+        if (!isStrictlyLocalBinding) {
+          logger.warn(`⚠️ Smart auth: binding to ${this.host} (not loopback) — auth enforced for ALL requests. Set GATEWAY_AUTH=false to disable or bind to 127.0.0.1.`);
+        }
+      } else {
+        logger.info('🔒 Authentication middleware enabled (GATEWAY_AUTH=true, always enforce)');
+      }
     }
 
     // Paths exempt from rate limiting (health checks, dashboard polling, static assets)

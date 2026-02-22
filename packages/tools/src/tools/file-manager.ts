@@ -7,6 +7,37 @@ import type { ToolDefinition, ToolResult } from '../base.js';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const IS_WINDOWS = process.platform === 'win32';
 
+// ─── OS-critical paths: block destructive operations (delete/write) ───
+// The agent CAN read these paths for inspection, but cannot delete or overwrite them.
+const PROTECTED_PATHS_WINDOWS = [
+  /^c:\\windows\\system32/i,
+  /^c:\\windows\\syswow64/i,
+  /^c:\\windows\\winsxs/i,
+  /^c:\\windows\\boot/i,
+  /^c:\\windows\\servicing/i,
+  /^c:\\boot/i,
+  /^c:\\recovery/i,
+  /^c:\\\\windows\\system32/i,
+];
+const PROTECTED_PATHS_LINUX = [
+  /^\/boot\//,
+  /^\/sbin\//,
+  /^\/bin\//,
+  /^\/lib\//,
+  /^\/lib64\//,
+  /^\/usr\/bin\//,
+  /^\/usr\/sbin\//,
+  /^\/usr\/lib\//,
+  /^\/proc\//,
+  /^\/sys\//,
+];
+
+function isProtectedPath(absPath: string): boolean {
+  const normalized = absPath.replace(/\\/g, '\\');
+  const patterns = IS_WINDOWS ? PROTECTED_PATHS_WINDOWS : PROTECTED_PATHS_LINUX;
+  return patterns.some(p => p.test(normalized));
+}
+
 export class FileManagerTool extends BaseTool {
   private workspaceRoot: string;
 
@@ -61,6 +92,16 @@ On Windows: silent operations without opening any visible window.`,
     const encoding = (params['encoding'] as BufferEncoding) || 'utf-8';
 
     const targetPath = this.resolvePath(filePath);
+
+    // ─── OS Protection: block destructive ops on critical system paths ───
+    const DESTRUCTIVE_ACTIONS = ['write', 'delete', 'move', 'permissions'];
+    if (DESTRUCTIVE_ACTIONS.includes(action) && isProtectedPath(targetPath)) {
+      return {
+        success: false,
+        error: `🛡️ BLOCKED: Cannot ${action} on OS-critical path "${targetPath}". System files are protected from modification. You can still READ this path for inspection.`,
+        duration: 0,
+      };
+    }
 
     try {
       const { result, duration } = await this.timed(async () => {
