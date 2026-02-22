@@ -7,6 +7,7 @@ import type { ToolDefinition, ToolResult } from '../base.js';
 
 // ─── Security: hard-blocked patterns that would DESTROY the OS ───
 // Only truly catastrophic, irreversible commands. Everything else is allowed.
+// The agent can do ANYTHING else — install software, modify configs, run servers, etc.
 const HARD_BLOCKED_PATTERNS = [
   // Linux: wipe root filesystem
   'rm -rf /',
@@ -14,11 +15,25 @@ const HARD_BLOCKED_PATTERNS = [
   'rm -rf --no-preserve-root',
   // Linux: fork bomb
   ':(){:|:&};:',
-  // Linux: overwrite disk/MBR
+  // Linux: overwrite disk/MBR/partitions
   'dd if=/dev/zero of=/dev/sd',
   'dd if=/dev/random of=/dev/sd',
+  'dd if=/dev/zero of=/dev/nvme',
+  'dd if=/dev/zero of=/dev/hd',
+  'dd if=/dev/zero of=/dev/vd',
+  // Linux: destroy boot
+  'rm -rf /boot',
+  'rm -rf /etc',
+  'rm -rf /usr',
+  'rm -rf /var',
+  'rm -rf /lib',
+  // Linux: partition wipe
+  'wipefs -a /dev/',
+  'mkfs.ext4 /dev/sd',
+  'mkfs.ext4 /dev/nvme',
   // Windows: wipe system drive
   'format c:',
+  'format d:',
   'rd /s /q c:\\',
   'rd /s /q c:/',
   'del /f /s /q c:\\',
@@ -30,12 +45,46 @@ const HARD_BLOCKED_PATTERNS = [
   // Windows: destroy system32
   'del /f /s /q c:\\windows\\system32',
   'rd /s /q c:\\windows\\system32',
+  'del /f /s /q c:\\windows',
+  'rd /s /q c:\\windows',
+  // Windows: destroy user profiles
+  'rd /s /q c:\\users',
+  'del /f /s /q c:\\users',
+  // Windows: disk partition manipulation
+  'diskpart',
+  'clean all',
+  // Windows: destroy registry
+  'reg delete hklm\\system',
+  'reg delete hklm\\software',
+  'reg delete hklm\\sam',
   // Credential theft tools
   'mimikatz',
   'sekurlsa',
   'hashdump',
+  'lazagne',
   // Kill signal to ALL processes
   'kill -9 -1',
+  'taskkill /f /im csrss',
+  'taskkill /f /im wininit',
+  'taskkill /f /im smss',
+  // Ransomware-like patterns
+  'cipher /w:c:',
+];
+
+// Regex patterns for more sophisticated matching
+const HARD_BLOCKED_REGEX = [
+  // Linux: rm -rf on root-level system directories
+  /rm\s+-[a-z]*r[a-z]*f[a-z]*\s+\/(?:boot|etc|usr|var|lib|bin|sbin|proc|sys)\b/i,
+  // Windows: format any drive letter
+  /format\s+[a-z]:/i,
+  // Windows: recursive delete on drive root
+  /(?:rd|rmdir|del)\s+.*\/s.*[a-z]:\\/i,
+  // dd to any block device
+  /dd\s+.*of=\/dev\/(?:sd|hd|nvme|vd|loop)/i,
+  // mkfs on real devices
+  /mkfs\.\w+\s+\/dev\/(?:sd|hd|nvme|vd)/i,
+  // Windows: wipe system directories
+  /(?:remove-item|del|rd|rmdir)\s+.*(?:c:\\windows|c:\\users|system32)/i,
 ];
 
 // Patterns that are logged as HIGH RISK but always allowed (just audit trail)
@@ -95,6 +144,18 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
         return {
           success: false,
           error: `🛡️ BLOCKED: This command matches a destructive pattern ("${blocked}"). This protection cannot be bypassed.`,
+          duration: 0,
+        };
+      }
+    }
+
+    // ─── Security Layer 1b: Regex-based pattern matching ───
+    for (const regex of HARD_BLOCKED_REGEX) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED destructive command (regex)', { command, pattern: regex.source });
+        return {
+          success: false,
+          error: `🛡️ BLOCKED: This command matches a destructive OS pattern. Disk formatting, partition wiping, and system file destruction are not allowed.`,
           duration: 0,
         };
       }

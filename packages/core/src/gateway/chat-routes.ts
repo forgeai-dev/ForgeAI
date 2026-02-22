@@ -831,8 +831,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           const toolNames = [...new Set(toolCalls.map((s: { tool?: string }) => s.tool).filter(Boolean))];
           responseContent = `Processo concluido (${result.steps.length} etapas, ${toolCalls.length} acoes).\n`;
           responseContent += `Ferramentas: ${toolNames.join(', ') || 'nenhuma'}\n`;
-          responseContent += `Resultados: ${successes} ok, ${failures} erro(s)\n`;
-          responseContent += `O agente atingiu o limite de iteracoes. Se precisar continuar, envie outra mensagem.`;
+          responseContent += `Resultados: ${successes} ok, ${failures} erro(s)`;
         } else if (!responseContent) {
           responseContent = 'Processo concluido, mas nao houve resposta textual. Envie outra mensagem se precisar de mais informacoes.';
         }

@@ -267,6 +267,10 @@ export class PuppeteerBrowserTool extends BaseTool {
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        // ERR_ABORTED = URL triggered a download, not a page navigation
+        if (lastError.message.includes('ERR_ABORTED')) {
+          return { title: '', url, status: 'download_triggered', note: 'This URL triggers a file download. Use web_browse or shell_exec with curl to fetch the file directly.' };
+        }
         if (attempt >= MAX_RETRIES) throw lastError;
       }
     }
@@ -381,8 +385,25 @@ export class PuppeteerBrowserTool extends BaseTool {
       }
     }
 
-    const result = await page.evaluate(script);
-    return { result: result !== undefined ? String(result).slice(0, 10_000) : null };
+    // Auto-wrap scripts with `return` in an IIFE to avoid "Illegal return statement"
+    let safeScript = script;
+    if (script.includes('return ') && !script.trimStart().startsWith('(')) {
+      safeScript = `(() => { ${script} })()`;
+    }
+
+    try {
+      const result = await page.evaluate(safeScript);
+      return { result: result !== undefined ? String(result).slice(0, 10_000) : null };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Retry with IIFE wrapper if "Illegal return statement"
+      if (msg.includes('Illegal return statement') && safeScript === script) {
+        const wrapped = `(() => { ${script} })()`;
+        const result = await page.evaluate(wrapped);
+        return { result: result !== undefined ? String(result).slice(0, 10_000) : null };
+      }
+      throw err;
+    }
   }
 
   private async pdfAction(page: Page): Promise<Record<string, unknown>> {

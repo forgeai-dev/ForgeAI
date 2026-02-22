@@ -11,7 +11,8 @@ export interface ToolExecutor {
   execute(name: string, params: Record<string, unknown>, userId?: string): Promise<{ success: boolean; data?: unknown; error?: string; duration: number }>;
 }
 
-const MAX_TOOL_ITERATIONS = 25;
+// No iteration limit — the agent runs until the task is complete.
+// Only stuck-loop detection (duplicate calls) serves as safety.
 const MAX_RESULT_CHARS = 1500;
 
 const logger = createLogger('Agent:Runtime');
@@ -554,12 +555,12 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
         sessionId: params.sessionId,
         status: 'thinking',
         iteration: 0,
-        maxIterations: MAX_TOOL_ITERATIONS,
+        maxIterations: Infinity,
         steps: steps,
         startedAt: startTime,
       });
 
-      while (iterations < MAX_TOOL_ITERATIONS) {
+      while (true) {
         iterations++;
         this.updateProgress(params.sessionId, { status: 'thinking', iteration: iterations });
 
@@ -643,7 +644,7 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
           }
         }
 
-        logger.info(`[Iteration ${iterations}/${MAX_TOOL_ITERATIONS}] Agent calling ${response.toolCalls.length} tool(s): ${response.toolCalls.map(tc => tc.name).join(', ')}`);
+        logger.info(`[Iteration ${iterations}] Agent calling ${response.toolCalls.length} tool(s): ${response.toolCalls.map(tc => tc.name).join(', ')}`);
 
         // Add assistant message with tool_calls to context
         toolMessages.push({
