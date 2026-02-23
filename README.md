@@ -205,7 +205,7 @@ ForgeAI automatically detects whether the request comes from **localhost** (`127
 This means running ForgeAI on a **VPS** is just as secure as running it locally — external requests require an additional email verification step automatically, with no extra configuration.
 
 <p align="center">
-  <img src="docs/screenshots/security-email-otp.png" alt="ForgeAI Email OTP Verification" width="450" />
+  <img src="docs/screenshots/codigo_otp_email.png" alt="ForgeAI Email OTP Verification" width="450" />
 </p>
 
 ---
