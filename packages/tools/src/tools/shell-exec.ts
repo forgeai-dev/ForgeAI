@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import { DEFAULT_GATEWAY_PORT, DEFAULT_WS_PORT } from '@forgeai/shared';
 
 // ─── Security: hard-blocked patterns that would DESTROY the OS ───
 // Only truly catastrophic, irreversible commands. Everything else is allowed.
@@ -101,6 +102,64 @@ const DEFAULT_TIMEOUT = 300_000; // 5 minutes — npm install, docker build, etc
 
 const IS_WINDOWS = process.platform === 'win32';
 
+// ─── Self-Protection: prevent the agent from killing ForgeAI itself ───
+// Dynamically detect ForgeAI's own PIDs and ports at runtime so the agent
+// can never shut down its own host process or hijack its reserved ports.
+function getProtectedPIDs(): number[] {
+  return [process.pid, process.ppid].filter((p): p is number => typeof p === 'number' && p > 0);
+}
+
+function getProtectedPorts(): number[] {
+  const gatewayPort = Number(process.env['GATEWAY_PORT']) || DEFAULT_GATEWAY_PORT;
+  const wsPort = Number(process.env['WS_PORT']) || DEFAULT_WS_PORT;
+  return [gatewayPort, wsPort];
+}
+
+// Regex builders for self-protection detection
+function buildProcessKillRegexes(pids: number[]): RegExp[] {
+  const regexes: RegExp[] = [];
+  for (const pid of pids) {
+    const p = String(pid);
+    // PowerShell: Stop-Process -Id <PID> (with optional -Force)
+    regexes.push(new RegExp(`stop-process\\s+.*-id\\s+${p}\\b`, 'i'));
+    // Windows: taskkill /pid <PID>
+    regexes.push(new RegExp(`taskkill\\s+.*/?pid\\s+${p}\\b`, 'i'));
+    // Linux: kill <PID>, kill -9 <PID>, kill -SIGKILL <PID>
+    regexes.push(new RegExp(`(?:^|[;&|])\\s*kill\\s+(?:-\\w+\\s+)*${p}\\b`, 'i'));
+  }
+  return regexes;
+}
+
+function buildPortKillRegexes(ports: number[]): RegExp[] {
+  const regexes: RegExp[] = [];
+  for (const port of ports) {
+    const p = String(port);
+    // PowerShell: Get-NetTCPConnection -LocalPort <PORT> ... | Stop-Process
+    regexes.push(new RegExp(`get-nettcpconnection.*-localport\\s+${p}.*stop-process`, 'i'));
+    // Linux: fuser -k <PORT>/tcp
+    regexes.push(new RegExp(`fuser\\s+.*-k\\s+${p}/tcp`, 'i'));
+    regexes.push(new RegExp(`fuser\\s+-k\\s+${p}`, 'i'));
+    // Linux: lsof -ti:<PORT> | xargs kill
+    regexes.push(new RegExp(`lsof\\s+.*-ti:${p}.*kill`, 'i'));
+    // npx kill-port <PORT>
+    regexes.push(new RegExp(`kill-port\\s+${p}\\b`, 'i'));
+    // PowerShell: piped port lookup to Stop-Process
+    regexes.push(new RegExp(`localport.*${p}.*stop-process`, 'i'));
+    regexes.push(new RegExp(`stop-process.*localport.*${p}`, 'i'));
+  }
+  return regexes;
+}
+
+// Patterns that kill ALL Node.js processes (which would include ForgeAI)
+const KILL_ALL_NODE_REGEX = [
+  /taskkill\s+.*\/im\s+node\.exe/i,
+  /killall\s+node\b/i,
+  /pkill\s+(-\w+\s+)*node\b/i,
+  /stop-process\s+.*-name\s+['"]?node['"]?/i,
+  /wmic\s+.*node\.exe.*delete/i,
+  /get-process\s+.*node.*\|.*stop-process/i,
+];
+
 export class ShellExecTool extends BaseTool {
   private workDir: string;
 
@@ -161,7 +220,13 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       }
     }
 
-    // ─── Security Layer 2: Flag high-risk commands (allowed but logged) ───
+    // ─── Security Layer 2: Self-Protection (ForgeAI process & port) ───
+    const selfProtectBlock = this.checkSelfProtection(command);
+    if (selfProtectBlock) {
+      return selfProtectBlock;
+    }
+
+    // ─── Security Layer 3: Flag high-risk commands (allowed but logged) ───
     const risks: string[] = [];
     for (const pattern of HIGH_RISK_PATTERNS) {
       if (lowerCmd.includes(pattern.toLowerCase())) {
@@ -257,6 +322,68 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
         });
       });
     });
+  }
+
+  private checkSelfProtection(command: string): ToolResult | null {
+    const protectedPIDs = getProtectedPIDs();
+    const protectedPorts = getProtectedPorts();
+
+    // 1. Block killing ForgeAI by PID
+    const pidRegexes = buildProcessKillRegexes(protectedPIDs);
+    for (const regex of pidRegexes) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED: attempt to kill ForgeAI process', { command, pids: protectedPIDs });
+        return {
+          success: false,
+          error: `🛡️ SELF-PROTECTION: This command would kill the ForgeAI process (PID ${protectedPIDs.join('/')}). ` +
+                 `The agent cannot shut down its own host. Use a different PID or approach.`,
+          duration: 0,
+        };
+      }
+    }
+
+    // 2. Block killing ALL Node.js processes (ForgeAI runs on Node)
+    for (const regex of KILL_ALL_NODE_REGEX) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED: attempt to kill all Node processes', { command });
+        return {
+          success: false,
+          error: `🛡️ SELF-PROTECTION: This command would kill ALL Node.js processes, including ForgeAI itself. ` +
+                 `To stop a specific Node process, use its PID instead (but not ForgeAI's PID: ${protectedPIDs.join('/')}).`,
+          duration: 0,
+        };
+      }
+    }
+
+    // 3. Block killing processes on ForgeAI's reserved ports
+    const portRegexes = buildPortKillRegexes(protectedPorts);
+    for (const regex of portRegexes) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED: attempt to kill process on ForgeAI port', { command, ports: protectedPorts });
+        return {
+          success: false,
+          error: `🛡️ SELF-PROTECTION: Ports ${protectedPorts.join(' and ')} are reserved for ForgeAI (gateway/websocket). ` +
+                 `The agent cannot kill processes on these ports. Use a different port for your server.`,
+          duration: 0,
+        };
+      }
+    }
+
+    // 4. Warn (but allow) if command tries to listen on ForgeAI's port
+    //    (it would fail with EADDRINUSE anyway, but give a helpful message)
+    for (const port of protectedPorts) {
+      const listenPattern = new RegExp(
+        `(?:--port|\\s-p)\\s+${port}\\b|` +
+        `listen\\s*\\(\\s*${port}\\b|` +
+        `serve\\s+.*-l\\s+${port}\\b`,
+        'i'
+      );
+      if (listenPattern.test(command)) {
+        this.logger.warn('Command may conflict with ForgeAI port', { command, port });
+      }
+    }
+
+    return null;
   }
 
   getWorkDir(): string {
