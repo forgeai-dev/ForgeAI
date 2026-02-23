@@ -14,7 +14,7 @@
 
 <br />
 
-| 8 Channels | 10 LLM Providers | 13 Tools | 19 Dashboard Pages | 150+ API Endpoints | 7 Security Modules |
+| 8 Channels | 10 LLM Providers | 13 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
@@ -35,10 +35,10 @@
 
 ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and **IoT/embedded devices** via the Node Protocol — all managed through a modern 17-page dashboard.
 
-Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 7 security modules before reaching the agent.
+Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 9 security modules before reaching the agent.
 
 ```
-Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 13 Tools ──→ Response
+Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 13 Tools ──→ Response
      ↑                                                              ↓
   WhatsApp                                                    Browse web
   Telegram                                                    Run code
@@ -59,7 +59,7 @@ Your Messages ──→ 7 Security Layers ──→ Agent (any LLM) ──→ 13
 <td width="50%">
 
 ### 🔒 Security-First Architecture
-7 security modules active by default. AES-256-GCM encrypted vault, RBAC, rate limiting, prompt injection detection, input sanitization, 2FA, and immutable audit logging. Your API keys and tokens are **never** stored in plain text.
+9 security modules active by default. AES-256-GCM encrypted vault, RBAC, rate limiting, prompt injection detection, input sanitization, 2FA, **Email OTP** for external access, and immutable audit logging. **First-run Setup Wizard** guides you through SMTP, 2FA, and admin PIN configuration. Smart IP detection automatically applies stricter authentication for external (VPS/internet) access. Your API keys and tokens are **never** stored in plain text.
 
 ### 🌐 True Multi-Channel
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
@@ -93,9 +93,9 @@ cd ForgeAI
 docker compose up -d
 ```
 
-Open **http://localhost:18800** → add an LLM API key in Settings → start chatting.
+Open **http://localhost:18800** → the **Setup Wizard** guides you through SMTP, 2FA, and admin PIN configuration → add an LLM API key in Settings → start chatting.
 
-No `.env` file needed. Security secrets are auto-generated on first run.
+No `.env` file needed. Security secrets are auto-generated on first run. The Setup Wizard appears only once, on the very first access.
 
 > **Want Telegram/WhatsApp?** Add your bot token in the Dashboard → Settings. See [**QUICKSTART.md**](./QUICKSTART.md) for the full guide.
 
@@ -171,13 +171,14 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `sessions_send` | Send messages between agents for collaborative multi-agent workflows. |
 | `image_generate` | Generate images via DALL-E 3, Leonardo AI, or Stable Diffusion. Save to disk. |
 
-### Security Modules (7)
+### Security Modules (9)
 
 ```
 Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ──→ [RBAC] ──→ [Input Sanitizer] ──→ [Prompt Guard] ──→ Agent
-                                                                                                        ↓
-                                                                                              [Audit Log] (every action)
-                                                                                              [Vault] (encrypted secrets)
+                                    │                                                                  ↓
+                              [Smart IP Detection]                                          [Audit Log] (every action)
+                              Local? → PIN + 2FA                                            [Vault] (encrypted secrets)
+                              External? → PIN + 2FA + Email OTP (4-factor)
 ```
 
 | Module | Implementation |
@@ -187,8 +188,25 @@ Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ─�
 | **Rate Limiter** | 12 rules: per-user, per-channel, per-tool, per-IP. Sliding window + burst |
 | **Prompt Injection Guard** | 6 patterns: direct injection, role hijacking, encoding, delimiters, context manipulation, multi-language |
 | **Input Sanitizer** | Blocks XSS, SQL injection, command injection, path traversal |
-| **2FA (TOTP)** | Time-based one-time passwords for admin operations |
+| **2FA (TOTP)** | Time-based one-time passwords via Google Authenticator, Authy, etc. |
+| **Email OTP** | 6-digit verification codes sent to admin email for external access (5-min expiry, rate-limited) |
 | **Audit Log** | Immutable, 4 risk levels (low/medium/high/critical), queryable via API + Dashboard |
+| **Setup Wizard** | First-run guided setup: SMTP, 2FA, admin PIN — no config files needed |
+
+#### Smart Local vs External Detection
+
+ForgeAI automatically detects whether the request comes from **localhost** (`127.0.0.1` / `::1`) or an **external IP** (VPS, internet). Based on this:
+
+| Access Type | Authentication Flow |
+|:------------|:-------------------|
+| **Local** (localhost) | Access Token → PIN → TOTP |
+| **External** (VPS/internet) | Access Token → PIN → TOTP → **Email OTP** (4-factor) |
+
+This means running ForgeAI on a **VPS** is just as secure as running it locally — external requests require an additional email verification step automatically, with no extra configuration.
+
+<p align="center">
+  <img src="docs/screenshots/security-email-otp.png" alt="ForgeAI Email OTP Verification" width="450" />
+</p>
 
 ---
 
@@ -521,6 +539,7 @@ API endpoints:
                     │      SECURITY LAYER        │
                     │  Rate Limiter · IP Filter   │
                     │  JWT · RBAC · 2FA           │
+                    │  Email OTP · Smart IP Det.  │
                     │  Prompt Guard · Sanitizer   │
                     │  Audit Log · Vault          │
                     └─────────────┬──────────────┘
@@ -566,7 +585,7 @@ API endpoints:
 ```
 packages/
 ├── shared/      →  Types, utils, constants, logger
-├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Sanitizer, IP Filter
+├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Email OTP, Sanitizer, IP Filter
 ├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), UsageTracker, Agentic Loop
 ├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol
 ├── tools/       →  Tool Registry, 13 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
@@ -739,7 +758,7 @@ pnpm forge status      # Quick status check
 
 All core features are implemented and tested:
 
-- **Security** — 7 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, audit
+- **Security** — 9 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, Email OTP (external access), setup wizard, audit
 - **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol (IoT)
 - **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
@@ -750,6 +769,7 @@ All core features are implemented and tested:
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, Jetson, BeagleBone, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
+- **First-Run Setup Wizard** — Guided setup on first access: SMTP configuration with test connection, 2FA (TOTP) with QR code, admin PIN change. Smart local/external IP detection with 4-factor auth for VPS/external access (Access Token + PIN + TOTP + Email OTP). Email OTP service with styled HTML emails, 5-minute expiry, rate limiting. SMTP config manageable from Dashboard Settings
 - **Configurable Models** — All 10 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
 - **RAG Engine Upgrade** — Persistence (JSON to disk, auto-load on startup), runtime config API, file upload (PDF/TXT/MD/code), OpenAI embeddings support, dashboard RAG page
@@ -792,7 +812,7 @@ pnpm test    # 38 E2E tests
 | **Gateway** | Fastify 5 + WebSocket |
 | **Database** | MySQL 8 via Knex.js (10 tables) |
 | **Encryption** | AES-256-GCM, PBKDF2 (310k iter), bcrypt, HMAC-SHA256 |
-| **Auth** | JWT (access + refresh + rotation) + TOTP 2FA |
+| **Auth** | JWT (access + refresh + rotation) + TOTP 2FA + Email OTP (external) |
 | **Dashboard** | React 19, Vite 6, TailwindCSS 4, Lucide Icons |
 | **Channels** | grammY, discord.js, Baileys, Bolt SDK, Bot Framework, Go WebSocket (Node Protocol) |
 | **Browser** | Puppeteer (headless Chromium) |
