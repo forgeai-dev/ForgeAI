@@ -44,6 +44,8 @@ services:
       # Gateway
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 18800
+      # Public URL (set this to your server's public address for correct auth URLs)
+      PUBLIC_URL: ${PUBLIC_URL:-}
       # Security — leave empty for auto-generation on first run
       VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}

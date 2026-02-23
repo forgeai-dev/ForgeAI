@@ -972,7 +972,10 @@ export class Gateway {
       }
 
       const { token, expiresAt, expiresInSeconds } = this.accessTokenManager.generate();
-      const baseUrl = `http://${this.host === '0.0.0.0' ? request.hostname : this.host}:${this.port}`;
+      const publicUrl = process.env['PUBLIC_URL'];
+      const baseUrl = publicUrl
+        ? publicUrl.replace(/\/$/, '')
+        : `http://${this.host === '0.0.0.0' ? request.hostname : this.host}:${this.port}`;
       const accessUrl = `${baseUrl}/auth/access?token=${token}`;
 
       this.auditLogger.log({
@@ -985,9 +988,11 @@ export class Gateway {
 
       return {
         accessUrl,
+        accessPath: `/auth/access?token=${token}`,
         token,
         expiresAt: expiresAt.toISOString(),
         expiresInSeconds,
+        hint: publicUrl ? undefined : 'If accessing remotely, replace 127.0.0.1 with your server public IP.',
       };
     });
 
@@ -1297,12 +1302,19 @@ export class Gateway {
     <p class="subtitle">Dashboard access requires authentication</p>
     ${errorBlock}
     <div class="instruction">
-      <h3>How to access</h3>
+      <h3>Quick Access — Paste Token</h3>
+      <form method="GET" action="/auth/access" style="display:flex;gap:8px;margin-bottom:16px">
+        <input type="text" name="token" required placeholder="Paste your access token here..." style="flex:1;background:#000;border:1px solid #333;border-radius:8px;padding:10px 14px;color:#4ade80;font-family:'Fira Code',monospace;font-size:13px;outline:none;">
+        <button type="submit" style="background:#ff6b35;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-weight:600;cursor:pointer;font-size:13px;white-space:nowrap;">Go</button>
+      </form>
+    </div>
+    <div class="instruction">
+      <h3>How to get a token</h3>
       <p class="step"><strong>1.</strong> Connect to your server via SSH</p>
       <p class="step"><strong>2.</strong> Run the following command:</p>
       <div class="code-block">curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access | jq</div>
-      <p class="step" style="margin-top:12px;"><strong>3.</strong> Open the <strong>accessUrl</strong> in your browser</p>
-      <p class="step"><strong>4.</strong> Your session will be valid for <strong>24 hours</strong></p>
+      <p class="step" style="margin-top:12px;"><strong>3.</strong> Copy the <strong>token</strong> value and paste it above</p>
+      <p class="step"><strong>4.</strong> Or open the <strong>accessUrl</strong> directly (replace 127.0.0.1 with your server IP if remote)</p>
     </div>
     <hr class="divider">
     <p class="footer">Access tokens expire in 5 minutes · Sessions last 24h · IP lockout after 10 failed attempts</p>
@@ -1487,10 +1499,16 @@ export class Gateway {
       // Generate and print startup access URL
       if (process.env['GATEWAY_AUTH'] !== 'false') {
         const { token, expiresAt } = this.accessTokenManager.generate();
-        const displayHost = this.host === '0.0.0.0' ? '127.0.0.1' : this.host;
-        const accessUrl = `http://${displayHost}:${this.port}/auth/access?token=${token}`;
+        const publicUrl = process.env['PUBLIC_URL'];
+        const displayHost = publicUrl
+          ? publicUrl.replace(/\/$/, '')
+          : `http://${this.host === '0.0.0.0' ? '127.0.0.1' : this.host}:${this.port}`;
+        const accessUrl = `${displayHost}/auth/access?token=${token}`;
         logger.info(`🔑 Dashboard access URL (valid 5 min):`);
         logger.info(`   ${accessUrl}`);
+        if (!publicUrl && this.host === '0.0.0.0') {
+          logger.info(`   💡 Remote? Replace 127.0.0.1 with your server IP, or set PUBLIC_URL env var`);
+        }
         logger.info(`   Expires at: ${expiresAt.toISOString()}`);
         logger.info(`   Generate new: curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access`);
       }
