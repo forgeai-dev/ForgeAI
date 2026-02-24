@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use url::Url;
 
 /// Connection state
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -177,9 +176,7 @@ impl GatewayConnection {
             .replace("http://", "ws://");
         let ws_url = format!("{}/ws?token={}", ws_url, creds.jwt_token);
 
-        let url = Url::parse(&ws_url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-        let (ws_stream, _) = connect_async(url)
+        let (ws_stream, _) = connect_async(&ws_url)
             .await
             .map_err(|e| format!("WebSocket connection failed: {}", e))?;
 

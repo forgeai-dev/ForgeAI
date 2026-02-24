@@ -4,6 +4,7 @@
 //! and receives TTS audio from Gateway → plays back via speakers.
 //! Uses cpal for capture and rodio for playback.
 
+use base64::Engine as _;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -152,7 +153,7 @@ impl VoiceEngine {
 
         // Encode to WAV
         let wav_data = encode_wav(&all_samples, 16000)?;
-        let wav_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wav_data);
+        let wav_base64 = base64::engine::general_purpose::STANDARD.encode(&wav_data);
 
         Ok(CapturedAudio {
             duration_ms,
@@ -171,11 +172,9 @@ impl VoiceEngine {
     ) -> Result<String, String> {
         let url = format!("{}/api/voice/transcribe", gateway_url.trim_end_matches('/'));
 
-        let wav_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &audio.wav_base64,
-        )
-        .map_err(|e| format!("Base64 decode error: {}", e))?;
+        let wav_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&audio.wav_base64)
+            .map_err(|e| format!("Base64 decode error: {}", e))?;
 
         // Build multipart form
         let part = reqwest::multipart::Part::bytes(wav_bytes)
