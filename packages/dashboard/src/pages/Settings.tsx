@@ -742,7 +742,7 @@ export function SettingsPage() {
             </button>
 
             {smtpConfig.configured && smtpConfig.source === 'vault' && (
-              <button onClick={async () => {
+              <button title="Remove SMTP configuration" onClick={async () => {
                 if (!confirm('Remove SMTP configuration from Vault?')) return;
                 await fetch('/api/smtp/config', { method: 'DELETE' });
                 setSMTPFields({ host: '', port: '587', user: '', pass: '', from: '', adminEmail: '' });
