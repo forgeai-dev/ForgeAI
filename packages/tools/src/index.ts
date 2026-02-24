@@ -30,6 +30,9 @@ export type { NotionConfig, NotionPage, NotionDatabase, NotionBlock, NotionSearc
 export { HomeAssistantIntegration, createHomeAssistantIntegration } from './integrations/homeassistant-integration.js';
 export type { HomeAssistantConfig, HAEntity, HAScene } from './integrations/homeassistant-integration.js';
 export { SmartHomeTool, setHomeAssistantRef, getHomeAssistantRef } from './tools/smart-home.js';
+export { SpotifyIntegration, createSpotifyIntegration } from './integrations/spotify-integration.js';
+export type { SpotifyConfig, SpotifyTokens, SpotifyDevice, SpotifyTrack, SpotifyPlayback, SpotifyPlaylist, SpotifySearchResult } from './integrations/spotify-integration.js';
+export { SpotifyTool, setSpotifyRef, getSpotifyRef } from './tools/spotify.js';
 
 import { ToolRegistry } from './registry.js';
 import { WebBrowserTool } from './tools/web-browser.js';
@@ -44,6 +47,7 @@ import { ImageGeneratorTool } from './tools/image-generator.js';
 import { WebSearchTool } from './tools/web-search.js';
 import { SessionsListTool, SessionsHistoryTool, SessionsSendTool } from './tools/session-tools.js';
 import { SmartHomeTool } from './tools/smart-home.js';
+import { SpotifyTool } from './tools/spotify.js';
 import type { AuditLogger } from '@forgeai/security';
 
 export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegistry {
@@ -63,6 +67,7 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new SessionsHistoryTool());
   registry.register(new SessionsSendTool());
   registry.register(new SmartHomeTool());
+  registry.register(new SpotifyTool());
 
   return registry;
 }
