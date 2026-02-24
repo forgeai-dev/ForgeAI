@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Shield, Cpu, Clock, Zap, Lock, Radio, Eye, Bot, DollarSign, MessageSquare, BarChart3, PlayCircle, Signal, AlertTriangle, ChevronDown, ChevronUp, Thermometer, Brain, Wrench, Container, Terminal } from 'lucide-react';
+import { Activity, Shield, Cpu, Clock, Zap, Lock, Radio, Eye, Bot, DollarSign, MessageSquare, BarChart3, PlayCircle, Signal, AlertTriangle, ChevronDown, ChevronUp, Thermometer, Brain, Wrench, Container, Terminal, CheckCircle, XCircle, Mail, KeyRound, ShieldAlert, ShieldCheck, FileWarning, Globe } from 'lucide-react';
 import { api, type HealthData, type InfoData, type ProviderInfo } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -59,6 +59,79 @@ interface SecuritySummary {
     ipAddress?: string;
   }>;
   totalAlerts: number;
+}
+
+// ─── Event Info Mapper ─────────────────────────────────
+type LucideIcon = typeof Shield;
+
+interface EventInfo {
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+const EVENT_MAP: Record<string, EventInfo> = {
+  'auth.login': { label: 'Login Attempt', description: 'Someone tried to log in to the system', icon: KeyRound },
+  'auth.login_success': { label: 'Login Successful', description: 'Admin authenticated successfully', icon: KeyRound },
+  'auth.pin_verified': { label: 'PIN Verified', description: 'Access PIN was verified correctly', icon: Lock },
+  'auth.pin_failed': { label: 'PIN Verification Failed', description: 'Incorrect PIN entered — possible unauthorized access', icon: Lock },
+  'auth.pin_changed': { label: 'PIN Changed', description: 'Admin PIN was changed', icon: Lock },
+  'auth.2fa_verified': { label: '2FA Verified', description: 'Two-factor authentication code accepted', icon: Shield },
+  'auth.2fa_failed': { label: '2FA Verification Failed', description: 'Invalid 2FA code entered — check if your authenticator is synced', icon: ShieldAlert },
+  'auth.access_token_failed': { label: 'Invalid Access Token', description: 'A request with an invalid or expired token was blocked', icon: KeyRound },
+  'auth.token_refresh': { label: 'Token Refreshed', description: 'Session token was automatically renewed', icon: KeyRound },
+  'auth.session_expired': { label: 'Session Expired', description: 'A session timed out and was invalidated', icon: Clock },
+  'auth.email_otp_sent': { label: 'Email OTP Sent', description: 'Verification code sent to admin email (external access)', icon: Mail },
+  'auth.email_otp_verified': { label: 'Email OTP Verified', description: 'Email verification code accepted', icon: Mail },
+  'auth.email_otp_failed': { label: 'Email OTP Failed', description: 'Invalid or expired email verification code', icon: Mail },
+  'security.integrity_check': { label: 'Integrity Check', description: 'System performed a security integrity verification', icon: ShieldCheck },
+  'security.rate_limited': { label: 'Rate Limited', description: 'Too many requests — rate limiter activated', icon: Zap },
+  'security.ip_blocked': { label: 'IP Blocked', description: 'Request from blocked IP address was rejected', icon: Globe },
+  'security.prompt_injection': { label: 'Prompt Injection Blocked', description: 'Detected and blocked a prompt injection attempt', icon: Eye },
+  'security.input_sanitized': { label: 'Input Sanitized', description: 'Malicious input was cleaned before processing', icon: FileWarning },
+  'tool.execute': { label: 'Tool Executed', description: 'Agent executed a tool action', icon: Wrench },
+  'tool.blocked': { label: 'Tool Blocked', description: 'A blocked tool was attempted — action denied', icon: Wrench },
+  'tool.dangerous_call': { label: 'Dangerous Tool Call', description: 'Agent called a potentially dangerous tool', icon: AlertTriangle },
+  'config.update': { label: 'Config Updated', description: 'System configuration was changed', icon: Terminal },
+  'smtp.configured': { label: 'SMTP Configured', description: 'Email server settings were updated', icon: Mail },
+  '2fa.init': { label: '2FA Setup Initiated', description: 'Two-factor authentication setup started', icon: Shield },
+  '2fa.verify': { label: '2FA Setup Verified', description: 'Two-factor authentication setup completed', icon: Shield },
+  'vault.access': { label: 'Vault Accessed', description: 'Encrypted vault was read or written to', icon: Lock },
+};
+
+function getEventInfo(action: string): EventInfo {
+  if (EVENT_MAP[action]) return EVENT_MAP[action];
+
+  // Fallback: generate label from action name
+  const label = action
+    .replace(/[._]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+
+  const category = action.split('.')[0];
+  const iconMap: Record<string, LucideIcon> = {
+    auth: KeyRound, security: ShieldAlert, tool: Wrench,
+    config: Terminal, smtp: Mail, '2fa': Shield, vault: Lock,
+  };
+
+  return {
+    label,
+    description: `Event: ${action}`,
+    icon: iconMap[category] || Shield,
+  };
+}
+
+// ─── Relative Time Formatter ──────────────────────────
+function formatRelativeTime(timestamp: string): string {
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 export function OverviewPage() {
@@ -145,9 +218,9 @@ export function OverviewPage() {
         <div onClick={() => setSecurityExpanded(!securityExpanded)} className="cursor-pointer">
           <StatusCard
             title={t('overview.securityModules')}
-            value={`${securityModules}/7`}
+            value={`${securityModules}/9`}
             icon={<Shield className="w-5 h-5" />}
-            status={securityModules === 7 ? 'healthy' : 'warning'}
+            status={securityModules >= 7 ? 'healthy' : 'warning'}
             subtitle={securityExpanded ? `▲ ${t('overview.clickClose')}` : `▼ ${t('overview.clickDetails')}`}
           />
         </div>
@@ -183,30 +256,60 @@ export function OverviewPage() {
             ))}
           </div>
 
-          {/* Recent Security Events */}
+          {/* Recent Security Events — Enhanced */}
           {securitySummary.events.length > 0 && (
             <div className="border-t border-zinc-800 pt-3">
               <h3 className="text-xs font-semibold text-zinc-400 mb-2">{t('overview.recentEvents')}</h3>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {securitySummary.events.map(ev => (
-                  <div key={ev.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-zinc-900/50">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        ev.riskLevel === 'critical' ? 'bg-red-500' : ev.riskLevel === 'high' ? 'bg-amber-500' : 'bg-zinc-500'
-                      }`} />
-                      <span className="text-zinc-300 font-mono">{ev.action}</span>
+              <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+                {securitySummary.events.map(ev => {
+                  const info = getEventInfo(ev.action);
+                  const EventIcon = info.icon;
+                  const riskColors: Record<string, string> = {
+                    low: 'bg-zinc-700 text-zinc-400',
+                    medium: 'bg-amber-500/15 text-amber-400',
+                    high: 'bg-orange-500/15 text-orange-400',
+                    critical: 'bg-red-500/15 text-red-400',
+                  };
+                  const riskBorder: Record<string, string> = {
+                    low: 'border-zinc-800',
+                    medium: 'border-amber-500/10',
+                    high: 'border-orange-500/10',
+                    critical: 'border-red-500/15',
+                  };
+                  return (
+                    <div key={ev.id} className={`flex items-start gap-2.5 text-xs px-3 py-2.5 rounded-lg border bg-zinc-900/60 ${riskBorder[ev.riskLevel] || 'border-zinc-800'}`}>
+                      <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${ev.success ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
+                        <EventIcon className="w-3 h-3" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-zinc-200 font-medium truncate">{info.label}</span>
+                          {ev.success
+                            ? <CheckCircle className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                            : <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                          }
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${riskColors[ev.riskLevel] || riskColors.low}`}>
+                            {ev.riskLevel}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">{info.description}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className="text-[10px] text-zinc-500">{formatRelativeTime(ev.timestamp)}</span>
+                        {ev.ipAddress && <p className="text-[10px] text-zinc-600 font-mono">{ev.ipAddress}</p>}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {ev.ipAddress && <span className="text-zinc-600 font-mono">{ev.ipAddress}</span>}
-                      <span className="text-zinc-600">{new Date(ev.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
           {securitySummary.events.length === 0 && (
-            <p className="text-xs text-zinc-600 text-center py-2">{t('overview.noSecurityEvents')} ✓</p>
+            <div className="border-t border-zinc-800 pt-4 pb-2 text-center">
+              <ShieldCheck className="w-6 h-6 text-emerald-500 mx-auto mb-1" />
+              <p className="text-xs text-emerald-400 font-medium">All clear</p>
+              <p className="text-[10px] text-zinc-600">{t('overview.noSecurityEvents')}</p>
+            </div>
           )}
         </div>
       )}
