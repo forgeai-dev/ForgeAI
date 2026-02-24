@@ -30,6 +30,11 @@ log = "0.4"
 env_logger = "0.11"
 url = "2"
 dirs = "6"
+cpal = "0.15"
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
+hound = "3.5"
+base64 = "0.22"
+pv_porcupine = "3.0"
 
 [features]
 default = ["custom-protocol"]
