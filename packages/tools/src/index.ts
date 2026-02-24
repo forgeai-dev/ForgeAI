@@ -27,6 +27,9 @@ export { CalendarIntegration, createCalendarIntegration } from './integrations/c
 export type { CalendarConfig, CalendarEvent, CreateEventOptions, CalendarListEntry } from './integrations/calendar-integration.js';
 export { NotionIntegration, createNotionIntegration } from './integrations/notion-integration.js';
 export type { NotionConfig, NotionPage, NotionDatabase, NotionBlock, NotionSearchResult } from './integrations/notion-integration.js';
+export { HomeAssistantIntegration, createHomeAssistantIntegration } from './integrations/homeassistant-integration.js';
+export type { HomeAssistantConfig, HAEntity, HAScene } from './integrations/homeassistant-integration.js';
+export { SmartHomeTool, setHomeAssistantRef, getHomeAssistantRef } from './tools/smart-home.js';
 
 import { ToolRegistry } from './registry.js';
 import { WebBrowserTool } from './tools/web-browser.js';
@@ -40,6 +43,7 @@ import { DesktopAutomationTool } from './tools/desktop-automation.js';
 import { ImageGeneratorTool } from './tools/image-generator.js';
 import { WebSearchTool } from './tools/web-search.js';
 import { SessionsListTool, SessionsHistoryTool, SessionsSendTool } from './tools/session-tools.js';
+import { SmartHomeTool } from './tools/smart-home.js';
 import type { AuditLogger } from '@forgeai/security';
 
 export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegistry {
@@ -58,6 +62,7 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new SessionsListTool());
   registry.register(new SessionsHistoryTool());
   registry.register(new SessionsSendTool());
+  registry.register(new SmartHomeTool());
 
   return registry;
 }

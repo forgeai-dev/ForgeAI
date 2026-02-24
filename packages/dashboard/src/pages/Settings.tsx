@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio, Mail } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio, Mail, Home } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { useI18n, type Lang } from '@/lib/i18n';
 
@@ -81,6 +81,16 @@ export function SettingsPage() {
   const [smtpTestResult, setSMTPTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [smtpShowPass, setSMTPShowPass] = useState(false);
 
+  // Home Assistant state
+  const [haConfig, setHAConfig] = useState<{ configured: boolean }>({ configured: false });
+  const [haFields, setHAFields] = useState<{ url: string; token: string }>({ url: '', token: '' });
+  const [haSaving, setHASaving] = useState(false);
+  const [haSaved, setHASaved] = useState(false);
+  const [haError, setHAError] = useState('');
+  const [haTesting, setHATesting] = useState(false);
+  const [haTestResult, setHATestResult] = useState<{ ok: boolean; message?: string; version?: string } | null>(null);
+  const [haShowToken, setHAShowToken] = useState(false);
+
   // Wake Word state
   const [wakeWordStatus, setWakeWordStatus] = useState<{ enabled: boolean; running: boolean; keyword: string; sensitivity: number; detectionCount: number; lastDetection?: string; uptime: number } | null>(null);
   const [wakeWordStarting, setWakeWordStarting] = useState(false);
@@ -111,7 +121,13 @@ export function SettingsPage() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); }, [loadProviders, loadServices, loadSMTPConfig]);
+  const loadHAConfig = useCallback(() => {
+    fetch('/api/integrations/homeassistant/status').then(r => r.json()).then((d: { configured: boolean }) => {
+      setHAConfig(d);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); loadHAConfig(); }, [loadProviders, loadServices, loadSMTPConfig, loadHAConfig]);
 
   // Load wake word status
   const loadWakeWordStatus = useCallback(() => {
@@ -758,6 +774,95 @@ export function SettingsPage() {
             <p className="text-[10px] text-zinc-400 leading-relaxed">
               <strong>Gmail users:</strong> Use an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline text-forge-400 hover:text-forge-300">App Password</a> (not your regular password). Enable 2-Step Verification in Google first, then generate an App Password for "Mail".
               Settings are encrypted in the Vault.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Home Assistant */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Home className="w-5 h-5 text-forge-400" />
+            Smart Home (Home Assistant)
+          </h2>
+          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${haConfig.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+            {haConfig.configured ? 'Connected' : 'Not configured'}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
+          <p className="text-xs text-zinc-400">Control lights, switches, climate, scenes, and automations via Home Assistant. The agent can use natural language like "Turn off the lights" or "Set temperature to 22°C".</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Home Assistant URL</label>
+              <input type="url" placeholder="http://homeassistant.local:8123" value={haFields.url} onChange={e => setHAFields(f => ({ ...f, url: e.target.value }))}
+                className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Long-Lived Access Token</label>
+              <div className="relative">
+                <input type={haShowToken ? 'text' : 'password'} placeholder="eyJ0eXAiOiJKV1QiLCJhbGc..." value={haFields.token} onChange={e => setHAFields(f => ({ ...f, token: e.target.value }))}
+                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-8 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50 font-mono" />
+                <button type="button" onClick={() => setHAShowToken(!haShowToken)} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                  {haShowToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {haError && <p className="text-xs text-red-400 font-medium">{haError}</p>}
+          {haTestResult && (
+            <p className={`text-xs font-medium ${haTestResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {haTestResult.ok ? `Connected! ${haTestResult.message || ''}${haTestResult.version ? ` (v${haTestResult.version})` : ''}` : `Test failed: ${haTestResult.message || haTestResult.error}`}
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={async () => {
+              setHASaving(true); setHAError(''); setHATestResult(null);
+              try {
+                const res = await fetch('/api/integrations/homeassistant/configure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: haFields.url.trim(), token: haFields.token.trim() }) });
+                const data = await res.json() as { error?: string; configured?: boolean };
+                if (data.error) { setHAError(data.error); } else { setHASaved(true); setHAFields(f => ({ ...f, token: '' })); setTimeout(() => setHASaved(false), 2000); loadHAConfig(); }
+              } catch (err) { setHAError(err instanceof Error ? err.message : 'Failed'); }
+              setHASaving(false);
+            }} disabled={haSaving || !haFields.url.trim() || !haFields.token.trim()}
+              className={`px-4 py-2 rounded-lg text-white text-xs font-medium transition-all ${haSaved ? 'bg-emerald-500' : haSaving ? 'bg-forge-500/50 cursor-wait' : haFields.url.trim() && haFields.token.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+              {haSaved ? <><Check className="w-3.5 h-3.5 inline mr-1" />Saved</> : haSaving ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Saving...</> : <><Save className="w-3.5 h-3.5 inline mr-1" />Save</>}
+            </button>
+
+            <button onClick={async () => {
+              setHATesting(true); setHATestResult(null);
+              try {
+                const res = await fetch('/api/integrations/homeassistant/test', { method: 'POST' });
+                const data = await res.json() as { ok: boolean; message?: string; version?: string; error?: string };
+                setHATestResult(data);
+              } catch { setHATestResult({ ok: false, message: 'Request failed' }); }
+              setHATesting(false);
+            }} disabled={haTesting || !haConfig.configured}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all border ${haConfig.configured ? 'border-forge-500/30 text-forge-400 hover:bg-forge-500/10' : 'border-zinc-700 text-zinc-500 cursor-not-allowed opacity-50'}`}>
+              {haTesting ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Testing...</> : 'Test Connection'}
+            </button>
+
+            {haConfig.configured && (
+              <button title="Remove Home Assistant configuration" onClick={async () => {
+                if (!confirm('Remove Home Assistant configuration?')) return;
+                await fetch('/api/integrations/homeassistant/config', { method: 'DELETE' });
+                setHAFields({ url: '', token: '' });
+                loadHAConfig();
+              }} className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
+            <Info className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+            <p className="text-[10px] text-zinc-400 leading-relaxed">
+              Go to <strong>Home Assistant → Profile → Long-Lived Access Tokens → Create Token</strong>. The token and URL are encrypted in the Vault. Once connected, say <em>"Turn off the lights"</em> or <em>"Set bedroom temperature to 22°C"</em> via any channel.
             </p>
           </div>
         </div>

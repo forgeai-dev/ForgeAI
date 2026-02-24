@@ -10,7 +10,7 @@ import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
-import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration } from '@forgeai/tools';
+import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
 import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef } from './chat-commands.js';
@@ -61,6 +61,7 @@ let nodeChannel: NodeChannel | null = null;
 let wakeWordManager: WakeWordManager | null = null;
 let artifactManager: ArtifactManager | null = null;
 let sessionRecorder: SessionRecorder | null = null;
+let homeAssistantIntegration: HomeAssistantIntegration | null = null;
 
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
@@ -3360,6 +3361,74 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     const { query, owner, repo } = request.body as { query: string; owner?: string; repo?: string };
     const results = await githubIntegration.searchCode(query, owner, repo);
     return { results };
+  });
+
+  // ─── Home Assistant Integration ───────────────────
+
+  homeAssistantIntegration = createHomeAssistantIntegration();
+  setHomeAssistantRef(homeAssistantIntegration);
+
+  // Load Home Assistant config from Vault on startup
+  if (vault?.isInitialized()) {
+    const haUrl = vault.get('integration:ha_url');
+    const haToken = vault.get('integration:ha_token');
+    if (haUrl && haToken) {
+      homeAssistantIntegration.configure({ url: haUrl, token: haToken });
+      logger.info('Home Assistant loaded from Vault', { url: haUrl });
+    }
+  }
+
+  app.get('/api/integrations/homeassistant/status', async () => {
+    if (!homeAssistantIntegration) return { configured: false };
+    return { configured: homeAssistantIntegration.isConfigured() };
+  });
+
+  app.post('/api/integrations/homeassistant/configure', async (request: FastifyRequest) => {
+    if (!homeAssistantIntegration) return { error: 'Home Assistant not initialized' };
+    const { url, token } = request.body as { url: string; token: string };
+    if (!url || !token) return { error: 'URL and Long-Lived Access Token are required' };
+
+    homeAssistantIntegration.configure({ url: url.trim(), token: token.trim() });
+
+    // Save to Vault
+    if (vault?.isInitialized()) {
+      vault.set('integration:ha_url', url.trim());
+      vault.set('integration:ha_token', token.trim());
+    }
+
+    logger.info('Home Assistant configured via Dashboard', { url });
+    return { configured: true };
+  });
+
+  app.post('/api/integrations/homeassistant/test', async () => {
+    if (!homeAssistantIntegration || !homeAssistantIntegration.isConfigured()) {
+      return { ok: false, error: 'Home Assistant not configured' };
+    }
+    return homeAssistantIntegration.testConnection();
+  });
+
+  app.delete('/api/integrations/homeassistant/config', async () => {
+    if (vault?.isInitialized()) {
+      vault.delete('integration:ha_url');
+      vault.delete('integration:ha_token');
+    }
+    if (homeAssistantIntegration) {
+      homeAssistantIntegration = createHomeAssistantIntegration();
+      setHomeAssistantRef(homeAssistantIntegration);
+    }
+    logger.info('Home Assistant config removed');
+    return { success: true, configured: false };
+  });
+
+  app.get('/api/integrations/homeassistant/devices', async (request: FastifyRequest) => {
+    if (!homeAssistantIntegration?.isConfigured()) return { devices: [], error: 'Not configured' };
+    const { domain } = request.query as { domain?: string };
+    try {
+      const devices = await homeAssistantIntegration.listDevicesByDomain(domain);
+      return { devices: devices.map(d => ({ entity_id: d.entity_id, name: d.friendly_name || d.entity_id, state: d.state })), count: devices.length };
+    } catch (err: unknown) {
+      return { devices: [], error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   // ─── RSS Feeds ────────────────────────────────────
