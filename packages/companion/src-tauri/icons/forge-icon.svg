@@ -1,32 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1c1917"/>
-      <stop offset="100%" stop-color="#0c0a09"/>
-    </linearGradient>
-    <linearGradient id="flame" x1="50%" y1="100%" x2="50%" y2="0%">
-      <stop offset="0%" stop-color="#ea580c"/>
-      <stop offset="40%" stop-color="#f97316"/>
-      <stop offset="75%" stop-color="#fb923c"/>
-      <stop offset="100%" stop-color="#fdba74"/>
-    </linearGradient>
-    <linearGradient id="flameInner" x1="50%" y1="100%" x2="50%" y2="0%">
       <stop offset="0%" stop-color="#f97316"/>
-      <stop offset="100%" stop-color="#fef3c7"/>
+      <stop offset="100%" stop-color="#c2410c"/>
     </linearGradient>
   </defs>
 
-  <!-- Background -->
+  <!-- Background: orange gradient (forge-500 → forge-700) -->
   <rect width="512" height="512" rx="102" fill="url(#bg)"/>
 
-  <!-- Outer flame -->
-  <path d="M256 88c0 0-20 30-35 55c-25 42-55 85-55 140c0 72 40 130 90 145c50-15 90-73 90-145c0-55-30-98-55-140c-15-25-35-55-35-55z"
-    fill="url(#flame)" opacity="0.95"/>
-
-  <!-- Inner flame (brighter core) -->
-  <path d="M256 180c0 0-12 22-20 40c-14 30-30 60-30 95c0 48 22 82 50 95c28-13 50-47 50-95c0-35-16-65-30-95c-8-18-20-40-20-40z"
-    fill="url(#flameInner)" opacity="0.9"/>
-
-  <!-- Bright center dot -->
-  <ellipse cx="256" cy="360" rx="18" ry="24" fill="#fff7ed" opacity="0.7"/>
+  <!-- Lucide Flame icon (white, scaled to fit) -->
+  <g transform="translate(128, 96) scale(10.67)" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+  </g>
 </svg>

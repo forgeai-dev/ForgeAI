@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Flame, Send, Settings, Link } from 'lucide-react';
 
 // Tauri API will be available at runtime via window.__TAURI__
 declare global {
@@ -144,10 +145,8 @@ export default function App() {
         </div>
 
         <div className="flex-1 p-5 flex flex-col justify-center gap-4">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-orange-500/20 flex items-center justify-center mb-2">
-            <svg className="w-8 h-8 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
-            </svg>
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center mb-2 shadow-lg shadow-orange-500/20">
+            <Flame className="w-8 h-8 text-white" />
           </div>
 
           <div>
@@ -200,10 +199,8 @@ export default function App() {
       <div data-tauri-drag-region className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="relative">
-            <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center">
-              <svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
-              </svg>
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center">
+              <Flame className="w-4 h-4 text-white" />
             </div>
             <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-zinc-950" />
           </div>
@@ -218,10 +215,7 @@ export default function App() {
             className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-all"
             title="Settings"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -254,10 +248,8 @@ export default function App() {
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center mb-3 animate-float">
-              <svg className="w-7 h-7 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
-              </svg>
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center mb-3 animate-float shadow-lg shadow-orange-500/20">
+              <Flame className="w-7 h-7 text-white" />
             </div>
             <p className="text-sm text-zinc-400 font-medium">Hey! I'm ForgeAI</p>
             <p className="text-[11px] text-zinc-600 mt-1 max-w-[240px]">
@@ -317,9 +309,7 @@ export default function App() {
             className="w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:bg-zinc-700 flex items-center justify-center transition-all"
             title="Send message"
           >
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
+            <Send className="w-4 h-4 text-white" />
           </button>
         </div>
       </div>
