@@ -20,11 +20,9 @@
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "visible": false,
-        "skipTaskbar": true,
-        "center": false,
-        "x": 1500,
-        "y": 800
+        "visible": true,
+        "skipTaskbar": false,
+        "center": true
       }
     ],
     "trayIcon": {
