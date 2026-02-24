@@ -91,3 +91,100 @@ pub fn get_system_info() -> ActionResult {
         confirmed: false,
     })
 }
+
+// ─── Wake Word Commands ──────────────────────────────
+
+use crate::wake_word::{self, WakeWordEngine, WakeWordStatus};
+use crate::voice::{self, VoiceEngine, CapturedAudio};
+use std::sync::Mutex;
+use tauri::State;
+
+/// Managed state for wake word engine
+pub struct WakeWordState(pub Mutex<WakeWordEngine>);
+
+/// Managed state for voice engine
+pub struct VoiceState(pub Mutex<VoiceEngine>);
+
+/// Configure wake word with Picovoice access key
+#[tauri::command]
+pub fn wake_word_configure(
+    state: State<'_, WakeWordState>,
+    access_key: String,
+    sensitivity: f32,
+    keyword_path: Option<String>,
+) -> Result<String, String> {
+    let mut engine = state.0.lock().map_err(|e| e.to_string())?;
+    engine.configure(access_key, sensitivity);
+    if let Some(kw) = keyword_path {
+        engine.set_keyword_path(kw);
+    }
+    Ok("Wake word configured".into())
+}
+
+/// Start wake word detection
+#[tauri::command]
+pub fn wake_word_start(
+    state: State<'_, WakeWordState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    let engine = state.0.lock().map_err(|e| e.to_string())?;
+    engine.start(app_handle)?;
+    Ok("Wake word detection started".into())
+}
+
+/// Stop wake word detection
+#[tauri::command]
+pub fn wake_word_stop(state: State<'_, WakeWordState>) -> Result<String, String> {
+    let engine = state.0.lock().map_err(|e| e.to_string())?;
+    engine.stop();
+    Ok("Wake word detection stopped".into())
+}
+
+/// Get wake word engine status
+#[tauri::command]
+pub fn wake_word_status(state: State<'_, WakeWordState>) -> Result<WakeWordStatus, String> {
+    let engine = state.0.lock().map_err(|e| e.to_string())?;
+    Ok(engine.status())
+}
+
+// ─── Voice Commands ──────────────────────────────────
+
+/// Record audio from microphone (stops on silence or manual stop)
+#[tauri::command]
+pub fn voice_record(state: State<'_, VoiceState>) -> Result<CapturedAudio, String> {
+    let engine = state.0.lock().map_err(|e| e.to_string())?;
+    engine.record()
+}
+
+/// Stop an ongoing recording
+#[tauri::command]
+pub fn voice_stop(state: State<'_, VoiceState>) -> Result<String, String> {
+    let engine = state.0.lock().map_err(|e| e.to_string())?;
+    engine.stop_recording();
+    Ok("Recording stopped".into())
+}
+
+/// Send text to Gateway TTS and play the response audio
+#[tauri::command]
+pub async fn voice_speak(text: String) -> Result<String, String> {
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    let engine = VoiceEngine::new();
+    engine
+        .speak(&creds.gateway_url, &creds.jwt_token, &text)
+        .await?;
+
+    Ok("Speech played".into())
+}
+
+/// List available audio input/output devices
+#[tauri::command]
+pub fn list_audio_devices() -> Result<serde_json::Value, String> {
+    let inputs = wake_word::list_audio_devices();
+    let outputs = voice::list_output_devices();
+    Ok(serde_json::json!({
+        "inputs": inputs,
+        "outputs": outputs,
+    }))
+}

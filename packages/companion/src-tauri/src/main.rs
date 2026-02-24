@@ -9,6 +9,8 @@ mod commands;
 mod connection;
 mod local_actions;
 mod safety;
+mod voice;
+mod wake_word;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -20,6 +22,12 @@ fn main() {
     env_logger::init();
 
     tauri::Builder::default()
+        .manage(commands::WakeWordState(std::sync::Mutex::new(
+            wake_word::WakeWordEngine::new(),
+        )))
+        .manage(commands::VoiceState(std::sync::Mutex::new(
+            voice::VoiceEngine::new(),
+        )))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -34,6 +42,14 @@ fn main() {
             commands::get_status,
             commands::disconnect,
             commands::get_system_info,
+            commands::wake_word_start,
+            commands::wake_word_stop,
+            commands::wake_word_status,
+            commands::wake_word_configure,
+            commands::voice_record,
+            commands::voice_stop,
+            commands::voice_speak,
+            commands::list_audio_devices,
         ])
         .setup(|app| {
             // ─── System Tray ───
