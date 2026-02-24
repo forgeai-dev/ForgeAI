@@ -1,5 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicholasio/tauri-v2-schema/main/schema.json",
   "productName": "ForgeAI Companion",
   "version": "1.0.0",
   "identifier": "ai.forge.companion",

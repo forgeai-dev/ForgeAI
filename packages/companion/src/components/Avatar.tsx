@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+// Avatar component — no React hooks needed, pure CSS animations
 
 export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
@@ -9,22 +9,6 @@ interface AvatarProps {
 }
 
 export function Avatar({ state, size = 64, onClick }: AvatarProps) {
-  const [pulseScale, setPulseScale] = useState(1);
-
-  // Breathing animation for idle state
-  useEffect(() => {
-    if (state !== 'idle') return;
-    let frame: number;
-    let start = Date.now();
-    const animate = () => {
-      const t = (Date.now() - start) / 1000;
-      setPulseScale(1 + Math.sin(t * 1.5) * 0.04);
-      frame = requestAnimationFrame(animate);
-    };
-    frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
-  }, [state]);
-
   const stateColors: Record<AvatarState, { bg: string; ring: string; glow: string; icon: string }> = {
     idle: {
       bg: 'from-indigo-600 to-violet-600',
@@ -56,8 +40,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
 
   return (
     <div
-      className="relative flex items-center justify-center cursor-pointer select-none"
-      style={{ width: size, height: size }}
+      className={`relative flex items-center justify-center cursor-pointer select-none w-[${size}px] h-[${size}px]`}
       onClick={onClick}
       title={`ForgeAI — ${state}`}
     >
@@ -65,12 +48,10 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
       {state === 'listening' && (
         <>
           <div
-            className={`absolute inset-0 rounded-full border-2 ${colors.ring} animate-pulse-ring`}
-            style={{ animationDuration: '1.5s' }}
+            className={`absolute inset-0 rounded-full border-2 ${colors.ring} animate-pulse-ring avatar-ring-fast`}
           />
           <div
-            className={`absolute inset-0 rounded-full border ${colors.ring} animate-pulse-ring`}
-            style={{ animationDuration: '2s', animationDelay: '0.3s' }}
+            className={`absolute inset-0 rounded-full border ${colors.ring} animate-pulse-ring avatar-ring-slow`}
           />
         </>
       )}
@@ -78,7 +59,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
       {/* Thinking spinner */}
       {state === 'thinking' && (
         <div className="absolute inset-[-4px]">
-          <svg className="w-full h-full animate-spin" style={{ animationDuration: '2s' }} viewBox="0 0 100 100">
+          <svg className="w-full h-full animate-spin avatar-spin-slow" viewBox="0 0 100 100">
             <circle
               cx="50" cy="50" r="46"
               fill="none"
@@ -103,13 +84,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="absolute rounded-full border border-cyan-400/30"
-              style={{
-                width: `${100 + i * 20}%`,
-                height: `${100 + i * 20}%`,
-                animation: `pulse-ring ${1.2 + i * 0.3}s ease-out infinite`,
-                animationDelay: `${i * 0.2}s`,
-              }}
+              className={`absolute rounded-full border border-cyan-400/30 avatar-wave-${i}`}
             />
           ))}
         </div>
@@ -117,10 +92,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
 
       {/* Main avatar circle */}
       <div
-        className={`relative w-full h-full rounded-full bg-gradient-to-br ${colors.bg} shadow-lg ${colors.glow} flex items-center justify-center transition-all duration-300`}
-        style={{
-          transform: `scale(${state === 'idle' ? pulseScale : 1})`,
-        }}
+        className={`relative w-full h-full rounded-full bg-gradient-to-br ${colors.bg} shadow-lg ${colors.glow} flex items-center justify-center transition-all duration-300 ${state === 'idle' ? 'animate-float' : ''}`}
       >
         {/* Core icon — sparkle/AI symbol */}
         <svg

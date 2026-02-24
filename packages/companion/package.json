@@ -5,8 +5,11 @@
   "description": "ForgeAI Desktop Companion — lightweight native assistant for Windows",
   "scripts": {
     "dev": "tauri dev",
+    "dev:vite": "vite",
     "build": "tauri build",
-    "preview": "vite preview"
+    "build:vite": "vite build",
+    "preview": "vite preview",
+    "icons": "tauri icon src-tauri/icons/forge-icon.svg"
   },
   "dependencies": {
     "react": "^19.0.0",

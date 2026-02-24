@@ -10,8 +10,8 @@
 
 body {
   background: transparent;
-  user-select: none;
   -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Draggable title bar area */
@@ -44,3 +44,20 @@ body {
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-pulse-ring { animation: pulse-ring 1.5s ease-out infinite; }
 .animate-fade-in { animation: fade-in 0.3s ease-out; }
+
+/* Avatar — pulse ring durations */
+.avatar-ring-fast { animation-duration: 1.5s; }
+.avatar-ring-slow { animation-duration: 2s; animation-delay: 0.3s; }
+
+/* Avatar — thinking spinner */
+.avatar-spin-slow { animation-duration: 2s; }
+
+/* Avatar — speaking wave rings */
+.avatar-wave-0 { width: 100%; height: 100%; animation: pulse-ring 1.2s ease-out infinite; animation-delay: 0s; }
+.avatar-wave-1 { width: 120%; height: 120%; animation: pulse-ring 1.5s ease-out infinite; animation-delay: 0.2s; }
+.avatar-wave-2 { width: 140%; height: 140%; animation: pulse-ring 1.8s ease-out infinite; animation-delay: 0.4s; }
+
+/* App — bounce dots */
+.bounce-dot-1 { animation-delay: 0ms; }
+.bounce-dot-2 { animation-delay: 150ms; }
+.bounce-dot-3 { animation-delay: 300ms; }
