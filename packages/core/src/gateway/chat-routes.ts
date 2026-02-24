@@ -10,7 +10,7 @@ import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
-import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef } from '@forgeai/tools';
+import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
 import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef } from './chat-commands.js';
@@ -62,6 +62,7 @@ let wakeWordManager: WakeWordManager | null = null;
 let artifactManager: ArtifactManager | null = null;
 let sessionRecorder: SessionRecorder | null = null;
 let homeAssistantIntegration: HomeAssistantIntegration | null = null;
+let spotifyIntegration: SpotifyIntegration | null = null;
 
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
@@ -3429,6 +3430,118 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     } catch (err: unknown) {
       return { devices: [], error: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // ─── Spotify Integration ──────────────────────────
+
+  spotifyIntegration = createSpotifyIntegration();
+  setSpotifyRef(spotifyIntegration);
+
+  // Determine redirect URI for Spotify OAuth
+  const publicUrl = process.env['PUBLIC_URL'] || `http://127.0.0.1:${process.env['GATEWAY_PORT'] || 18800}`;
+  const spotifyRedirectUri = `${publicUrl}/api/integrations/spotify/callback`;
+
+  // Load Spotify config from Vault on startup
+  if (vault?.isInitialized()) {
+    const clientId = vault.get('integration:spotify_client_id');
+    const clientSecret = vault.get('integration:spotify_client_secret');
+    if (clientId && clientSecret) {
+      spotifyIntegration.configure({ clientId, clientSecret, redirectUri: spotifyRedirectUri });
+
+      // Load tokens if available
+      const accessToken = vault.get('integration:spotify_access_token');
+      const refreshToken = vault.get('integration:spotify_refresh_token');
+      const expiresAt = vault.get('integration:spotify_expires_at');
+      if (accessToken && refreshToken) {
+        spotifyIntegration.setTokens({ accessToken, refreshToken, expiresAt: Number(expiresAt) || 0 });
+      }
+    }
+  }
+
+  // Auto-save tokens to Vault when refreshed
+  spotifyIntegration.onTokensRefreshed((tokens) => {
+    if (vault?.isInitialized()) {
+      vault.set('integration:spotify_access_token', tokens.accessToken);
+      vault.set('integration:spotify_refresh_token', tokens.refreshToken);
+      vault.set('integration:spotify_expires_at', String(tokens.expiresAt));
+      logger.info('Spotify tokens auto-saved to Vault after refresh');
+    }
+  });
+
+  app.get('/api/integrations/spotify/status', async () => {
+    if (!spotifyIntegration) return { configured: false, authenticated: false };
+    return {
+      configured: spotifyIntegration.isConfigured(),
+      authenticated: spotifyIntegration.isAuthenticated(),
+      redirectUri: spotifyRedirectUri,
+    };
+  });
+
+  app.post('/api/integrations/spotify/configure', async (request: FastifyRequest) => {
+    if (!spotifyIntegration) return { error: 'Spotify not initialized' };
+    const { clientId, clientSecret } = request.body as { clientId: string; clientSecret: string };
+    if (!clientId || !clientSecret) return { error: 'Client ID and Client Secret are required' };
+
+    spotifyIntegration.configure({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), redirectUri: spotifyRedirectUri });
+
+    if (vault?.isInitialized()) {
+      vault.set('integration:spotify_client_id', clientId.trim());
+      vault.set('integration:spotify_client_secret', clientSecret.trim());
+    }
+
+    logger.info('Spotify configured via Dashboard');
+    return { configured: true, authorizeUrl: spotifyIntegration.getAuthorizeUrl() };
+  });
+
+  app.get('/api/integrations/spotify/authorize', async () => {
+    if (!spotifyIntegration?.isConfigured()) return { error: 'Spotify not configured' };
+    return { url: spotifyIntegration.getAuthorizeUrl(String(Date.now())) };
+  });
+
+  // OAuth2 callback — Spotify redirects here after user authorizes
+  app.get('/api/integrations/spotify/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code, error: authError } = request.query as { code?: string; error?: string };
+
+    if (authError) {
+      reply.header('Content-Type', 'text/html');
+      return reply.send('<html><body><h2>Spotify Authorization Failed</h2><p>' + authError + '</p><script>setTimeout(()=>window.close(),3000)</script></body></html>');
+    }
+
+    if (!code || !spotifyIntegration?.isConfigured()) {
+      reply.header('Content-Type', 'text/html');
+      return reply.send('<html><body><h2>Error</h2><p>Missing code or Spotify not configured.</p></body></html>');
+    }
+
+    try {
+      const tokens = await spotifyIntegration.exchangeCode(code);
+
+      if (vault?.isInitialized()) {
+        vault.set('integration:spotify_access_token', tokens.accessToken);
+        vault.set('integration:spotify_refresh_token', tokens.refreshToken);
+        vault.set('integration:spotify_expires_at', String(tokens.expiresAt));
+      }
+
+      logger.info('Spotify authorized successfully');
+      reply.header('Content-Type', 'text/html');
+      return reply.send('<html><body style="background:#18181b;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2 style="color:#22c55e">✓ Spotify Connected!</h2><p style="color:#a1a1aa">You can close this window.</p><script>setTimeout(()=>window.close(),2000)</script></div></body></html>');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error('Spotify OAuth callback failed', { error: msg });
+      reply.header('Content-Type', 'text/html');
+      return reply.send('<html><body style="background:#18181b;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2 style="color:#ef4444">✗ Connection Failed</h2><p style="color:#a1a1aa">' + msg + '</p></div></body></html>');
+    }
+  });
+
+  app.delete('/api/integrations/spotify/config', async () => {
+    if (vault?.isInitialized()) {
+      for (const key of ['integration:spotify_client_id', 'integration:spotify_client_secret', 'integration:spotify_access_token', 'integration:spotify_refresh_token', 'integration:spotify_expires_at']) {
+        vault.delete(key);
+      }
+    }
+    spotifyIntegration = createSpotifyIntegration();
+    setSpotifyRef(spotifyIntegration);
+    logger.info('Spotify config removed');
+    return { success: true, configured: false, authenticated: false };
   });
 
   // ─── RSS Feeds ────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio, Mail, Home } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio, Mail, Home, Music, ExternalLink } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { useI18n, type Lang } from '@/lib/i18n';
 
@@ -91,6 +91,14 @@ export function SettingsPage() {
   const [haTestResult, setHATestResult] = useState<{ ok: boolean; message?: string; version?: string } | null>(null);
   const [haShowToken, setHAShowToken] = useState(false);
 
+  // Spotify state
+  const [spotifyConfig, setSpotifyConfig] = useState<{ configured: boolean; authenticated: boolean; redirectUri?: string }>({ configured: false, authenticated: false });
+  const [spotifyFields, setSpotifyFields] = useState<{ clientId: string; clientSecret: string }>({ clientId: '', clientSecret: '' });
+  const [spotifySaving, setSpotifySaving] = useState(false);
+  const [spotifySaved, setSpotifySaved] = useState(false);
+  const [spotifyError, setSpotifyError] = useState('');
+  const [spotifyShowSecret, setSpotifyShowSecret] = useState(false);
+
   // Wake Word state
   const [wakeWordStatus, setWakeWordStatus] = useState<{ enabled: boolean; running: boolean; keyword: string; sensitivity: number; detectionCount: number; lastDetection?: string; uptime: number } | null>(null);
   const [wakeWordStarting, setWakeWordStarting] = useState(false);
@@ -127,7 +135,13 @@ export function SettingsPage() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); loadHAConfig(); }, [loadProviders, loadServices, loadSMTPConfig, loadHAConfig]);
+  const loadSpotifyConfig = useCallback(() => {
+    fetch('/api/integrations/spotify/status').then(r => r.json()).then((d: { configured: boolean; authenticated: boolean; redirectUri?: string }) => {
+      setSpotifyConfig(d);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); loadHAConfig(); loadSpotifyConfig(); }, [loadProviders, loadServices, loadSMTPConfig, loadHAConfig, loadSpotifyConfig]);
 
   // Load wake word status
   const loadWakeWordStatus = useCallback(() => {
@@ -863,6 +877,111 @@ export function SettingsPage() {
             <Info className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
             <p className="text-[10px] text-zinc-400 leading-relaxed">
               Go to <strong>Home Assistant → Profile → Long-Lived Access Tokens → Create Token</strong>. The token and URL are encrypted in the Vault. Once connected, say <em>"Turn off the lights"</em> or <em>"Set bedroom temperature to 22°C"</em> via any channel.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Spotify */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Music className="w-5 h-5 text-forge-400" />
+            Spotify
+          </h2>
+          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${spotifyConfig.authenticated ? 'bg-emerald-500/20 text-emerald-400' : spotifyConfig.configured ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-700 text-zinc-400'}`}>
+            {spotifyConfig.authenticated ? 'Connected' : spotifyConfig.configured ? 'Not authorized' : 'Not configured'}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
+          <p className="text-xs text-zinc-400">Control Spotify playback via natural language. Say "Play my focus playlist" or "Next track" from any channel.</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Client ID</label>
+              <input type="text" placeholder="Your Spotify Client ID" value={spotifyFields.clientId} onChange={e => setSpotifyFields(f => ({ ...f, clientId: e.target.value }))}
+                className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50 font-mono" />
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Client Secret</label>
+              <div className="relative">
+                <input type={spotifyShowSecret ? 'text' : 'password'} placeholder="Your Spotify Client Secret" value={spotifyFields.clientSecret} onChange={e => setSpotifyFields(f => ({ ...f, clientSecret: e.target.value }))}
+                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-8 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50 font-mono" />
+                <button type="button" onClick={() => setSpotifyShowSecret(!spotifyShowSecret)} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                  {spotifyShowSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {spotifyConfig.redirectUri && (
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Redirect URI (add this to your Spotify app)</label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono overflow-x-auto">{spotifyConfig.redirectUri}</code>
+                <button title="Copy redirect URI" onClick={() => { navigator.clipboard.writeText(spotifyConfig.redirectUri || ''); }} className="px-2 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-all">
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {spotifyError && <p className="text-xs text-red-400 font-medium">{spotifyError}</p>}
+
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={async () => {
+              setSpotifySaving(true); setSpotifyError('');
+              try {
+                const res = await fetch('/api/integrations/spotify/configure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: spotifyFields.clientId.trim(), clientSecret: spotifyFields.clientSecret.trim() }) });
+                const data = await res.json() as { error?: string; configured?: boolean };
+                if (data.error) { setSpotifyError(data.error); } else { setSpotifySaved(true); setSpotifyFields(f => ({ ...f, clientSecret: '' })); setTimeout(() => setSpotifySaved(false), 2000); loadSpotifyConfig(); }
+              } catch (err) { setSpotifyError(err instanceof Error ? err.message : 'Failed'); }
+              setSpotifySaving(false);
+            }} disabled={spotifySaving || !spotifyFields.clientId.trim() || !spotifyFields.clientSecret.trim()}
+              className={`px-4 py-2 rounded-lg text-white text-xs font-medium transition-all ${spotifySaved ? 'bg-emerald-500' : spotifySaving ? 'bg-forge-500/50 cursor-wait' : spotifyFields.clientId.trim() && spotifyFields.clientSecret.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+              {spotifySaved ? <><Check className="w-3.5 h-3.5 inline mr-1" />Saved</> : spotifySaving ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Saving...</> : <><Save className="w-3.5 h-3.5 inline mr-1" />Save</>}
+            </button>
+
+            {spotifyConfig.configured && !spotifyConfig.authenticated && (
+              <button onClick={async () => {
+                try {
+                  const res = await fetch('/api/integrations/spotify/authorize');
+                  const data = await res.json() as { url?: string; error?: string };
+                  if (data.url) window.open(data.url, '_blank', 'width=500,height=700');
+                  else setSpotifyError(data.error || 'Failed to get authorize URL');
+                  // Poll for auth completion
+                  const poll = setInterval(() => { loadSpotifyConfig(); }, 2000);
+                  setTimeout(() => clearInterval(poll), 120_000);
+                } catch { setSpotifyError('Failed to start authorization'); }
+              }} className="px-4 py-2 rounded-lg text-xs font-medium transition-all border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10">
+                <ExternalLink className="w-3.5 h-3.5 inline mr-1" />Authorize Spotify
+              </button>
+            )}
+
+            {spotifyConfig.authenticated && (
+              <span className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Authorized
+              </span>
+            )}
+
+            {spotifyConfig.configured && (
+              <button title="Remove Spotify configuration" onClick={async () => {
+                if (!confirm('Remove Spotify configuration and disconnect?')) return;
+                await fetch('/api/integrations/spotify/config', { method: 'DELETE' });
+                setSpotifyFields({ clientId: '', clientSecret: '' });
+                loadSpotifyConfig();
+              }} className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
+            <Info className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+            <p className="text-[10px] text-zinc-400 leading-relaxed">
+              Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline text-forge-400 hover:text-forge-300">Spotify Developer Dashboard</a> → Create App → copy Client ID and Secret. Add the <strong>Redirect URI</strong> shown above to your app settings. Requires <strong>Spotify Premium</strong> for playback control.
             </p>
           </div>
         </div>
