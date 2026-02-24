@@ -1,9 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --forge-500: #6366f1;
-  --forge-400: #818cf8;
-  --forge-600: #4f46e5;
+  --forge-50: #fff7ed;
+  --forge-100: #ffedd5;
+  --forge-200: #fed7aa;
+  --forge-300: #fdba74;
+  --forge-400: #fb923c;
+  --forge-500: #f97316;
+  --forge-600: #ea580c;
+  --forge-700: #c2410c;
+  --forge-800: #9a3412;
+  --forge-900: #7c2d12;
+  --forge-950: #431407;
 }
 
 body {

@@ -11,10 +11,10 @@ interface AvatarProps {
 export function Avatar({ state, size = 64, onClick }: AvatarProps) {
   const stateColors: Record<AvatarState, { bg: string; ring: string; glow: string; icon: string }> = {
     idle: {
-      bg: 'from-indigo-600 to-violet-600',
-      ring: 'border-indigo-400/30',
-      glow: 'shadow-indigo-500/20',
-      icon: '#a5b4fc',
+      bg: 'from-orange-500 to-orange-700',
+      ring: 'border-orange-400/30',
+      glow: 'shadow-orange-500/20',
+      icon: '#fdba74',
     },
     listening: {
       bg: 'from-emerald-500 to-teal-600',
@@ -29,10 +29,10 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
       icon: '#fcd34d',
     },
     speaking: {
-      bg: 'from-cyan-500 to-blue-600',
-      ring: 'border-cyan-400/50',
-      glow: 'shadow-cyan-500/30',
-      icon: '#67e8f9',
+      bg: 'from-orange-400 to-amber-600',
+      ring: 'border-orange-400/50',
+      glow: 'shadow-orange-500/30',
+      icon: '#fed7aa',
     },
   };
 
@@ -84,7 +84,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className={`absolute rounded-full border border-cyan-400/30 avatar-wave-${i}`}
+              className={`absolute rounded-full border border-orange-400/30 avatar-wave-${i}`}
             />
           ))}
         </div>
@@ -140,7 +140,7 @@ export function Avatar({ state, size = 64, onClick }: AvatarProps) {
           state === 'idle' ? 'text-zinc-500' :
           state === 'listening' ? 'bg-emerald-500/10 text-emerald-400' :
           state === 'thinking' ? 'bg-amber-500/10 text-amber-400' :
-          'bg-cyan-500/10 text-cyan-400'
+          'bg-orange-500/10 text-orange-400'
         }`}>
           {state === 'idle' ? '' :
            state === 'listening' ? 'Listening...' :

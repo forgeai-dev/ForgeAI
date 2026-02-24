@@ -144,9 +144,9 @@ export default function App() {
         </div>
 
         <div className="flex-1 p-5 flex flex-col justify-center gap-4">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-2">
-            <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.44a4.5 4.5 0 00-6.364-6.364L4.5 8.25" />
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-orange-500/20 flex items-center justify-center mb-2">
+            <svg className="w-8 h-8 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
             </svg>
           </div>
 
@@ -157,7 +157,7 @@ export default function App() {
               placeholder="http://127.0.0.1:18800 or https://your-vps.com:18800"
               value={gatewayUrl}
               onChange={(e) => setGatewayUrl(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-orange-500/50 font-mono"
             />
           </div>
 
@@ -169,7 +169,7 @@ export default function App() {
               value={pairingCode}
               onChange={(e) => setPairingCode(e.target.value)}
               maxLength={6}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono text-center text-lg tracking-[0.3em]"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-orange-500/50 font-mono text-center text-lg tracking-[0.3em]"
             />
           </div>
 
@@ -180,7 +180,7 @@ export default function App() {
           <button
             onClick={handlePair}
             disabled={pairing || !gatewayUrl.trim() || pairingCode.length < 6}
-            className="w-full py-2.5 rounded-lg text-white text-sm font-medium bg-indigo-500 hover:bg-indigo-600 disabled:bg-zinc-700 disabled:cursor-not-allowed transition-all"
+            className="w-full py-2.5 rounded-lg text-white text-sm font-medium bg-orange-500 hover:bg-orange-600 disabled:bg-zinc-700 disabled:cursor-not-allowed transition-all"
           >
             {pairing ? 'Connecting...' : 'Connect'}
           </button>
@@ -200,9 +200,9 @@ export default function App() {
       <div data-tauri-drag-region className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="relative">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center">
+              <svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
               </svg>
             </div>
             <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-zinc-950" />
@@ -254,9 +254,9 @@ export default function App() {
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-3 animate-float">
-              <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            <div className="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center mb-3 animate-float">
+              <svg className="w-7 h-7 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 23c-3.866 0-7-3.134-7-7 0-3.526 3.008-6.324 5.5-8.778A38.8 38.8 0 0 0 12 5.5l.017-.018c.182-.19.358-.375.528-.56.396-.428.764-.877 1.1-1.345A12.1 12.1 0 0 0 14.714 1.5 10.7 10.7 0 0 1 16 5c0 1.074-.317 2.074-.862 2.91C16.34 8.55 17.5 9.766 18.5 11.5 19.5 13.234 19 16 19 16s-.5 3.134-3 5c-.669.5-1.442.868-2.266 1.078A6.98 6.98 0 0 1 12 23z" />
               </svg>
             </div>
             <p className="text-sm text-zinc-400 font-medium">Hey! I'm ForgeAI</p>
@@ -274,7 +274,7 @@ export default function App() {
             <div
               className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                 msg.role === 'user'
-                  ? 'bg-indigo-500 text-white rounded-br-md'
+                  ? 'bg-orange-500 text-white rounded-br-md'
                   : msg.role === 'system'
                   ? 'bg-zinc-800/50 text-zinc-400 border border-zinc-700/50 rounded-bl-md'
                   : 'bg-zinc-800 text-zinc-200 rounded-bl-md'
@@ -309,12 +309,12 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-orange-500/50"
           />
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            className="w-9 h-9 rounded-xl bg-indigo-500 hover:bg-indigo-600 disabled:bg-zinc-700 flex items-center justify-center transition-all"
+            className="w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:bg-zinc-700 flex items-center justify-center transition-all"
             title="Send message"
           >
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

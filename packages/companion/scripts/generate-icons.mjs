@@ -16,8 +16,8 @@ if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true });
 
 import { deflateSync } from 'zlib';
 
-// ForgeAI brand color: indigo #6366f1
-const R = 99, G = 102, B = 241, A = 255;
+// ForgeAI brand color: orange #f97316
+const R = 249, G = 115, B = 22, A = 255;
 
 /** Create a minimal ICO file from a 32x32 PNG */
 function createICO(png32) {
