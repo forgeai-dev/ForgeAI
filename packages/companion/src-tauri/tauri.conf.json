@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicholasio/tauri-v2-schema/main/schema.json",
+  "productName": "ForgeAI Companion",
+  "version": "1.0.0",
+  "identifier": "ai.forge.companion",
+  "build": {
+    "beforeDevCommand": "pnpm dev:vite",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build:vite",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "ForgeAI Companion",
+        "width": 380,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "center": false,
+        "x": 1500,
+        "y": 800
+      }
+    ],
+    "trayIcon": {
+      "iconPath": "icons/tray-icon.png",
+      "iconAsTemplate": false,
+      "tooltip": "ForgeAI Companion"
+    },
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' wss://* ws://* https://*; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "languages": ["English", "PortugueseBR"],
+        "shortDescription": "ForgeAI Desktop Companion",
+        "template": null
+      }
+    }
+  }
+}
