@@ -1,0 +1,125 @@
+name: Companion Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/companion/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/companion/**'
+
+jobs:
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/companion/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install
+        working-directory: packages/companion
+
+      - name: Build frontend
+        run: pnpm build:vite
+        working-directory: packages/companion
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: packages/companion
+          tauriScript: pnpm tauri
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgeai-companion-windows-msi
+          path: packages/companion/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+      - name: Upload NSIS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgeai-companion-windows-nsis
+          path: packages/companion/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+
+  release:
+    name: Create Release
+    needs: build-windows
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download MSI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: forgeai-companion-windows-msi
+          path: artifacts/msi
+
+      - name: Download NSIS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: forgeai-companion-windows-nsis
+          path: artifacts/nsis
+
+      - name: Get version
+        id: version
+        run: echo "version=$(jq -r .version packages/companion/src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: companion-v${{ steps.version.outputs.version }}
+          name: ForgeAI Companion v${{ steps.version.outputs.version }}
+          body: |
+            ## ForgeAI Desktop Companion v${{ steps.version.outputs.version }}
+
+            Lightweight native Windows assistant (~15MB).
+
+            ### Installation
+            - **MSI Installer** — Standard Windows installer (recommended)
+            - **NSIS Installer** — Alternative installer with more options
+
+            ### Requirements
+            - Windows 10/11 (64-bit)
+            - WebView2 Runtime (included in Windows 11, auto-installed on Windows 10)
+
+            ### Features
+            - System tray assistant with wake word detection ("Hey Forge")
+            - Voice input/output (STT/TTS)
+            - Local file management, app control, shell commands
+            - Anti-disaster safety system (protects system files)
+            - Secure WebSocket connection to ForgeAI Gateway (local or VPS)
+          files: |
+            artifacts/msi/*
+            artifacts/nsis/*
+          draft: false
+          prerelease: false
