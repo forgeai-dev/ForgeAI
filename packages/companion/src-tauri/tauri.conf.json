@@ -46,15 +46,12 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "languages": ["English", "PortugueseBR"],
-        "shortDescription": "ForgeAI Desktop Companion",
-        "template": null
+        "languages": ["English", "PortugueseBR"]
       }
     }
   }

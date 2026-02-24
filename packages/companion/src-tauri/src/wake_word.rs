@@ -1,9 +1,12 @@
 //! # Wake Word Detection Engine
 //!
-//! Uses Picovoice Porcupine for on-device wake word detection.
-//! Default keyword: "Hey Forge" (customizable).
-//! Runs in a background thread, consuming <1% CPU when idle.
-//! When triggered, emits an event to the Tauri frontend.
+//! Listens for voice activity using energy-based detection (VAD).
+//! When speech is detected above the sensitivity threshold, emits
+//! a `wake-word-detected` Tauri event to activate the companion.
+//!
+//! Architecture note: Picovoice Porcupine support can be added as
+//! an optional feature once the `pv_porcupine` crate is republished
+//! on crates.io (all v3.x versions are currently yanked).
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,13 +48,13 @@ impl WakeWordEngine {
         }
     }
 
-    /// Configure the engine with Picovoice access key
+    /// Configure the engine (access_key reserved for future Porcupine support)
     pub fn configure(&mut self, access_key: String, sensitivity: f32) {
         self.access_key = Some(access_key);
         self.sensitivity = sensitivity.clamp(0.0, 1.0);
     }
 
-    /// Set custom keyword model path
+    /// Set custom keyword model path (reserved for future Porcupine support)
     pub fn set_keyword_path(&mut self, path: String) {
         self.keyword_path = Some(path);
     }
@@ -71,38 +74,26 @@ impl WakeWordEngine {
         }
     }
 
-    /// Start listening for the wake word in a background thread
+    /// Start listening in a background thread
     pub fn start(&self, app_handle: AppHandle) -> Result<(), String> {
         if self.running.load(Ordering::Relaxed) {
             return Err("Wake word engine already running".into());
         }
 
-        let access_key = self
-            .access_key
-            .clone()
-            .ok_or("Picovoice access key not configured")?;
-
         let sensitivity = self.sensitivity;
         let running = self.running.clone();
-        let keyword_path = self.keyword_path.clone();
 
         running.store(true, Ordering::Relaxed);
 
         std::thread::spawn(move || {
-            if let Err(e) = run_detection_loop(
-                &access_key,
-                sensitivity,
-                keyword_path.as_deref(),
-                &running,
-                &app_handle,
-            ) {
+            if let Err(e) = run_detection_loop(sensitivity, &running, &app_handle) {
                 log::error!("Wake word engine error: {}", e);
                 running.store(false, Ordering::Relaxed);
             }
         });
 
         log::info!(
-            "Wake word engine started (sensitivity: {})",
+            "Wake word engine started (sensitivity: {}, mode: energy-VAD)",
             self.sensitivity
         );
         Ok(())
@@ -120,36 +111,14 @@ impl WakeWordEngine {
     }
 }
 
-/// Core detection loop — runs in a dedicated thread
+/// Energy-based voice activity detection loop.
+/// Detects sustained speech energy above threshold and emits activation event.
+/// This serves as a working fallback until Porcupine crate is available again.
 fn run_detection_loop(
-    access_key: &str,
     sensitivity: f32,
-    keyword_path: Option<&str>,
     running: &Arc<AtomicBool>,
     app_handle: &AppHandle,
 ) -> Result<(), String> {
-    // Initialize Porcupine
-    let porcupine = if let Some(kw_path) = keyword_path {
-        pv_porcupine::PorcupineBuilder::new_with_keyword_paths(access_key, &[kw_path])
-            .sensitivities(&[sensitivity])
-            .init()
-            .map_err(|e| format!("Porcupine init failed: {}", e))?
-    } else {
-        // Use built-in "porcupine" keyword as fallback
-        // Users should provide a custom "Hey Forge" .ppn file
-        pv_porcupine::PorcupineBuilder::new_with_keywords(
-            access_key,
-            &[pv_porcupine::BuiltinKeywords::Porcupine],
-        )
-        .sensitivities(&[sensitivity])
-        .init()
-        .map_err(|e| format!("Porcupine init failed: {}", e))?
-    };
-
-    let frame_length = porcupine.frame_length() as usize;
-    let sample_rate = porcupine.sample_rate();
-
-    // Set up audio capture
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -162,20 +131,17 @@ fn run_detection_loop(
 
     let config = cpal::StreamConfig {
         channels: 1,
-        sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: cpal::BufferSize::Fixed(frame_length as u32),
+        sample_rate: cpal::SampleRate(16000),
+        buffer_size: cpal::BufferSize::Default,
     };
 
-    // Audio buffer shared between callback and processing
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<i16>>(16);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(16);
 
     let stream = device
         .build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                // Convert f32 samples to i16
-                let samples: Vec<i16> = data.iter().map(|&s| (s * 32767.0) as i16).collect();
-                let _ = tx.try_send(samples);
+                let _ = tx.try_send(data.to_vec());
             },
             |err| {
                 log::error!("Audio stream error: {}", err);
@@ -188,39 +154,44 @@ fn run_detection_loop(
         .play()
         .map_err(|e| format!("Failed to start audio stream: {}", e))?;
 
-    log::info!("Wake word: audio stream active, listening...");
+    log::info!("Wake word: audio stream active, listening (energy-VAD)...");
 
-    // Processing loop
-    let mut buffer: Vec<i16> = Vec::with_capacity(frame_length);
+    // Energy threshold: lower sensitivity = harder to trigger
+    // sensitivity 0.0 → threshold 0.10 (hard)
+    // sensitivity 0.5 → threshold 0.03 (default)
+    // sensitivity 1.0 → threshold 0.005 (very sensitive)
+    let energy_threshold = 0.10 * (1.0 - sensitivity * 0.95);
+
+    // Require sustained speech for ~300ms to avoid false triggers
+    let sustained_frames_required = 5;
+    let mut sustained_count: u32 = 0;
 
     while running.load(Ordering::Relaxed) {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(samples) => {
-                buffer.extend_from_slice(&samples);
+                let rms: f32 = (samples.iter().map(|s| s * s).sum::<f32>()
+                    / samples.len().max(1) as f32)
+                    .sqrt();
 
-                // Process full frames
-                while buffer.len() >= frame_length {
-                    let frame: Vec<i16> = buffer.drain(..frame_length).collect();
+                if rms > energy_threshold {
+                    sustained_count += 1;
+                } else {
+                    sustained_count = 0;
+                }
 
-                    match porcupine.process(&frame) {
-                        Ok(keyword_index) if keyword_index >= 0 => {
-                            log::info!("Wake word detected! (keyword index: {})", keyword_index);
+                if sustained_count >= sustained_frames_required {
+                    log::info!("Wake word: voice activity detected (RMS: {:.4})", rms);
 
-                            let event = WakeWordEvent {
-                                keyword: "Hey Forge".to_string(),
-                                timestamp: chrono::Utc::now().to_rfc3339(),
-                            };
+                    let event = WakeWordEvent {
+                        keyword: "Hey Forge".to_string(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
 
-                            let _ = app_handle.emit("wake-word-detected", event);
+                    let _ = app_handle.emit("wake-word-detected", event);
 
-                            // Brief cooldown to prevent repeated triggers
-                            std::thread::sleep(std::time::Duration::from_secs(2));
-                        }
-                        Ok(_) => {} // No detection
-                        Err(e) => {
-                            log::error!("Porcupine process error: {}", e);
-                        }
-                    }
+                    // Cooldown to prevent rapid re-triggers
+                    sustained_count = 0;
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,

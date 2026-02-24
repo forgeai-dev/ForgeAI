@@ -38,13 +38,11 @@ jobs:
         with:
           workspaces: packages/companion/src-tauri -> target
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: pnpm install
-        working-directory: packages/companion
 
-      - name: Build frontend
-        run: pnpm build:vite
-        working-directory: packages/companion
+      - name: Generate icons
+        run: node packages/companion/scripts/generate-icons.mjs
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

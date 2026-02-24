@@ -2,6 +2,7 @@
   "name": "@forgeai/companion",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "ForgeAI Desktop Companion — lightweight native assistant for Windows",
   "scripts": {
     "dev": "tauri dev",
@@ -25,6 +26,7 @@
     "typescript": "^5.7.3",
     "vite": "^6.0.0",
     "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0"
   }
