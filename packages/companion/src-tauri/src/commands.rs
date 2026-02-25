@@ -167,6 +167,7 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
             "message": message,
             "sessionId": session_id,
             "userId": creds.companion_id,
+            "channelType": "companion",
         }))
         .timeout(std::time::Duration::from_secs(120))
         .send()

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2 } from 'lucide-react';
+import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2, Flame } from 'lucide-react';
 import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -26,6 +26,7 @@ const CHANNEL_CONFIG: Record<string, { label: string; icon: typeof MessageSquare
   teams: { label: 'Teams', icon: Hash, color: 'text-violet-400', bg: 'bg-violet-500/15' },
   googlechat: { label: 'Google Chat', icon: Globe, color: 'text-blue-400', bg: 'bg-blue-500/15' },
   discord: { label: 'Discord', icon: Radio, color: 'text-indigo-400', bg: 'bg-indigo-500/15' },
+  companion: { label: 'Companion', icon: Flame, color: 'text-orange-400', bg: 'bg-orange-500/15' },
   webchat: { label: 'Web', icon: MessageSquare, color: 'text-zinc-400', bg: 'bg-zinc-500/10' },
 };
 

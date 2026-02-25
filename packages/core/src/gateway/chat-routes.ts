@@ -1249,6 +1249,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       agentId?: string;
       model?: string;
       provider?: string;
+      channelType?: string;
       image?: { data: string; mimeType: string; filename?: string };
     };
 
@@ -1268,7 +1269,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     try {
       // ── Universal chat commands ──
       const cmdResult = handleChatCommand(body.message, sessionId, agentManager, {
-        channelType: 'webchat',
+        channelType,
         userId,
         isGroup: false,
         isAdmin: true,
@@ -1280,8 +1281,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           content: cmdResult.response ?? '',
           timestamp: new Date().toISOString(),
         };
-        const webchatMeta = { channelType: 'webchat', userId };
-        await chatHistoryStore?.saveMessage(sessionId, cmdStored, webchatMeta);
+        const chatMeta = { channelType, userId };
+        await chatHistoryStore?.saveMessage(sessionId, cmdStored, chatMeta);
         return {
           id: cmdStored.id,
           content: cmdResult.response ?? '',
@@ -1296,14 +1297,14 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       }
 
       // Persist user message
-      const webchatMeta = { channelType: 'webchat', userId };
+      const chatMeta = { channelType, userId };
       const userStored: StoredMessage = {
         id: `user-${Date.now()}`,
         role: 'user',
         content: body.message,
         timestamp: new Date().toISOString(),
       };
-      await chatHistoryStore?.saveMessage(sessionId, userStored, webchatMeta);
+      await chatHistoryStore?.saveMessage(sessionId, userStored, chatMeta);
 
       // Register WS progress listener for real-time streaming
       const wsBroadcaster = getWSBroadcaster();
@@ -1339,7 +1340,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         sessionId,
         userId,
         content: body.message,
-        channelType: 'webchat',
+        channelType,
         agentId: body.agentId,
         image: body.image ? { base64: body.image.data, mimeType: body.image.mimeType } : undefined,
         modelOverride: body.model,
@@ -1369,7 +1370,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         steps: result.steps,
         timestamp: new Date().toISOString(),
       };
-      await chatHistoryStore?.saveMessage(sessionId, assistantStored, webchatMeta);
+      await chatHistoryStore?.saveMessage(sessionId, assistantStored, chatMeta);
 
       // Broadcast agent.done AFTER message is persisted so frontend can fetch it
       wsBroadcaster.broadcastToSession(sessionId, {
@@ -1565,6 +1566,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     const sessionId = body.sessionId ?? generateId('sess');
     const userId = body.userId ?? 'webchat-user';
+    const channelType = body.channelType || 'webchat';
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -1578,7 +1580,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         sessionId,
         userId,
         content: body.message,
-        channelType: 'webchat',
+        channelType,
       });
 
       let result;
