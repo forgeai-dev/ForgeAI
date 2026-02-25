@@ -430,8 +430,8 @@ export function OverviewPage() {
         </div>
       )}
 
-      {/* Agent Activity */}
-      {agentStats && (
+      {/* Agent Activity — only show when at least one LLM provider is configured */}
+      {agentStats && providers.some(p => p.configured) && (
         <div>
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Bot className="w-5 h-5 text-forge-400" />
