@@ -190,14 +190,12 @@ export default function App() {
     } catch {}
   }, [sessionId]);
 
-  // Load session list from Gateway
+  // Load session list from Gateway via Rust backend
   const loadSessions = useCallback(async () => {
-    const gwUrl = status?.gateway_url || gatewayUrl;
-    if (!gwUrl) return;
+    if (!status?.connected) return;
     setSessionsLoading(true);
     try {
-      const resp = await fetch(`${gwUrl}/api/chat/sessions`);
-      const data = await resp.json();
+      const data = (await invoke('list_sessions')) as { sessions?: Array<{ id: string; title: string; messageCount: number; updatedAt: string; lastMessage?: string }> };
       if (data.sessions) {
         setSessions(data.sessions.slice(0, 50));
       }
@@ -206,16 +204,13 @@ export default function App() {
     } finally {
       setSessionsLoading(false);
     }
-  }, [status?.gateway_url, gatewayUrl]);
+  }, [status?.connected]);
 
-  // Load session history when selecting a session
+  // Load session history when selecting a session via Rust backend
   const loadSessionHistory = useCallback(async (sid: string) => {
-    const gwUrl = status?.gateway_url || gatewayUrl;
-    if (!gwUrl) return;
     setHistoryLoading(true);
     try {
-      const resp = await fetch(`${gwUrl}/api/chat/history/${sid}`);
-      const data = await resp.json();
+      const data = (await invoke('get_session_history', { sessionId: sid })) as { messages?: Array<any> };
       if (data.messages && Array.isArray(data.messages)) {
         const mapped: ChatMessage[] = data.messages.map((m: any) => ({
           role: m.role as 'user' | 'assistant' | 'system',
@@ -233,7 +228,7 @@ export default function App() {
       setHistoryLoading(false);
       setShowSessions(false);
     }
-  }, [status?.gateway_url, gatewayUrl]);
+  }, []);
 
   // Start a new session
   const handleNewSession = useCallback(() => {
@@ -243,25 +238,28 @@ export default function App() {
     setAgentProgress(null);
     setShowSessions(false);
     try { localStorage.removeItem('forgeai_session_id'); } catch {}
-  }, []);
+    // Refresh session list so the previous conversation appears
+    setTimeout(() => loadSessions(), 300);
+  }, [loadSessions]);
 
-  // Delete a session
+  // Delete a session via Rust backend
   const handleDeleteSession = useCallback(async (sid: string) => {
-    const gwUrl = status?.gateway_url || gatewayUrl;
-    if (!gwUrl) return;
     try {
-      await fetch(`${gwUrl}/api/chat/sessions/${sid}`, { method: 'DELETE' });
+      await invoke('delete_session', { sessionId: sid });
       setSessions(prev => prev.filter(s => s.id !== sid));
       if (sessionId === sid) handleNewSession();
     } catch (err) {
       console.error('[ForgeAI] Failed to delete session:', err);
     }
-  }, [status?.gateway_url, gatewayUrl, sessionId, handleNewSession]);
+  }, [sessionId, handleNewSession]);
 
-  // Load last session history on connect
+  // Load last session history and session list on connect
   useEffect(() => {
-    if (status?.connected && sessionId) {
-      loadSessionHistory(sessionId);
+    if (status?.connected) {
+      loadSessions();
+      if (sessionId) {
+        loadSessionHistory(sessionId);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.connected]);
@@ -548,6 +546,8 @@ export default function App() {
       ]);
     }
     setLoading(false);
+    // Refresh session list so this conversation appears in history
+    loadSessions();
   };
 
   // Full Jarvis pipeline: record → STT → AI → TTS → play

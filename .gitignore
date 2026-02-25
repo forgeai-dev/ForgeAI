@@ -21,5 +21,11 @@ forgeai-vault.enc
 # Cookies / session tokens
 cookies.txt
 
+# Rust build artifacts (Companion / Tauri)
+**/src-tauri/target/
+
+# Companion build bundles
+**/src-tauri/target/release/bundle/
+
 # Landing page website (deployed separately, not part of the codebase)
 website/
