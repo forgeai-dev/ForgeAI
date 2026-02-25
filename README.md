@@ -282,6 +282,49 @@ Native desktop wrapper (`packages/desktop`) for Windows, macOS, and Linux:
 - **Minimize to Tray** — close button minimizes instead of quitting
 - **Persistent Settings** — gateway URL, window bounds, preferences stored in user data
 
+### 🔥 ForgeAI Companion (Windows)
+
+Lightweight native desktop client (`packages/companion`) built with **Tauri 2 + React + Rust**. Connects to any ForgeAI Gateway (local or remote) and lets you interact with the AI directly from your desktop.
+
+> **⚠️ Windows exclusive** — requires Windows 10/11 (x64). The Companion connects to the Gateway via HTTP/WebSocket, so the Gateway itself can run on any platform (Linux VPS, Docker, etc.).
+
+- **Pairing System** — connect to any Gateway with URL + pairing code (generated in Dashboard → Settings)
+- **Real-time Agent Progress** — WebSocket connection shows live tool execution (which tool is being called, success/failure) instead of just a loading spinner
+- **Tool Step Display** — collapsible tool execution history in each message (tool name, ✓/✗ status, duration)
+- **Screenshot Viewer** — click to expand fullscreen, download button, supports both local and remote Gateway screenshots
+- **Voice Mode** — push-to-talk with waveform visualizer, wake word detection ("Hey Forge"), STT → AI → TTS pipeline
+- **Config Sync** — securely transfer all Gateway configurations (LLM keys, TTS settings, system config) between Gateways using encrypted one-time sync codes
+- **System Tray** — minimize to tray, single instance enforcement
+- **Smart Safety System** — Rust-based security layer protects OS-critical paths (C:\Windows, System32, boot files) while allowing full file operations everywhere else
+- **Desktop Automation** — the AI agent can create folders, delete files, launch apps, take screenshots, and run shell commands on the machine running the Companion
+
+#### Quick Start (Companion)
+
+```powershell
+# Option 1: Install from .msi or .exe installer
+# Download from GitHub Releases → ForgeAI Companion_1.0.0_x64-setup.exe
+
+# Option 2: Build from source
+pnpm --filter @forgeai/companion build
+# Outputs: packages/companion/src-tauri/target/release/bundle/
+```
+
+1. Launch the Companion
+2. Enter your Gateway URL (e.g. `http://192.168.1.100:18800` or `http://your-vps-ip:18800`)
+3. Enter the pairing code from **Dashboard → Settings → Companion Pairing**
+4. Start chatting — the AI can now control your Windows desktop
+
+#### Config Sync (Transfer Settings Between Gateways)
+
+Securely migrate all your configurations from one Gateway to another without manual reconfiguration:
+
+1. **On the destination Gateway** (e.g. VPS): Go to Companion Settings or Dashboard → Config Sync → click **"Generate Sync Code"**
+2. A one-time 8-character code is generated (valid for 5 minutes)
+3. **On the source Gateway** (e.g. your local machine): Enter the destination URL + sync code → click **"Push Config"**
+4. All Vault data (LLM API keys, TTS config, system settings) is encrypted with AES-256-GCM using the sync code as the key, transmitted, and imported on the destination
+
+Security: codes are single-use, expire in 5 minutes, rate-limited to 3 attempts per 5 minutes. Data is encrypted independently of the Vault encryption — the sync code never travels alongside the encrypted data.
+
 ---
 
 ## 🧠 Advanced Capabilities
@@ -354,7 +397,8 @@ Onboard users securely with invite codes (`FORGE-XXXX-XXXX`). Generate codes fro
 
 - **AutoPlanner** — Break complex goals into dependency graphs, execute steps in parallel
 - **Thinking Levels** — Control reasoning depth: off, low, medium, high
-- **Backup & Restore** — Export/import encrypted vault data via API
+- **Backup & Restore** — Export/import encrypted vault data via API and Dashboard
+- **Config Sync** — Securely transfer all Gateway config between instances (AES-256-GCM, one-time codes)
 - **GDPR Compliance** — Full data export or deletion (right to be forgotten)
 - **OpenTelemetry** — Traces, metrics, OTLP/HTTP export
 - **OAuth2/SSO** — Google, GitHub, Microsoft authentication
@@ -591,9 +635,10 @@ packages/
 ├── tools/       →  Tool Registry, 13 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
 ├── plugins/     →  Plugin Manager, Plugin SDK, AutoResponder, ContentFilter, ChatCommands
 ├── workflows/   →  Workflow Engine, step runner, dependency graph, parallel execution
-├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing
+├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing, Config Sync
 ├── cli/         →  CLI commands: start, doctor, status, onboard
 ├── dashboard/   →  React 19 + Vite 6 + TailwindCSS 4 + Lucide Icons (17 pages)
+├── companion/   →  ForgeAI Companion — Tauri 2 + React + Rust (Windows native desktop client)
 ├── node-agent/       →  Go binary (~5MB) for Linux SBCs (Raspberry Pi, Jetson, BeagleBone)
 └── node-agent-esp32/ →  MicroPython agent for ESP32 microcontrollers (WiFi, GPIO, sensors)
 ```
@@ -619,6 +664,7 @@ ForgeAI exposes **140+ REST API endpoints**. Full list available at `GET /info`.
 | **Memory** | 5 | `POST /api/memory/store` · `POST /api/memory/search` · `POST /api/memory/consolidate` |
 | **RAG** | 6 | `POST /api/rag/ingest` · `POST /api/rag/search` · `GET /api/rag/documents` |
 | **Integrations** | 30+ | GitHub, Gmail, Calendar, Notion, RSS (CRUD + search + config) |
+| **Config Sync** | 5 | `POST /api/config/sync-init` · `POST /api/config/sync-push` · `POST /api/config/sync-receive` · `GET /api/config/sync-status` · `GET /api/config/export-summary` |
 | **System** | 15+ | `GET /health` · `GET /api/backup` · `GET /api/gdpr/export` · `GET /api/usage` · `GET /api/otel/status` |
 
 ---
@@ -774,16 +820,22 @@ All core features are implemented and tested:
 - **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
 - **RAG Engine Upgrade** — Persistence (JSON to disk, auto-load on startup), runtime config API, file upload (PDF/TXT/MD/code), OpenAI embeddings support, dashboard RAG page
 - **Cross-Platform Desktop** — Full macOS support (AppleScript, Vision OCR, screencapture), Linux improvements (Wayland, tesseract OCR, dependency detection), file manager with full system access (absolute paths, copy/move/search/permissions/disk_info), CLI ASCII banner
+- **ForgeAI Companion** — Tauri 2 + React + Rust native Windows client. Pairing system, real-time WebSocket agent progress, tool step display, screenshot viewer with fullscreen + download, voice mode with wake word, Config Sync, system tray, smart Rust safety system, desktop automation
+- **Config Sync** — Secure gateway-to-gateway configuration transfer. AES-256-GCM encryption with one-time 8-char sync codes (5-min TTL), rate-limited, audit-logged. Transfer all Vault data (LLM keys, TTS, system config) between Gateways
+- **Smart File Security** — Agent can delete folders/files anywhere EXCEPT OS-critical paths (C:\Windows, System32, boot, recovery). Shell commands blocked for drive-root wipes and system directory destruction. Rust safety layer in Companion with protected paths, processes, and registry keys
 
 ### What's Next
 
 | Feature | Priority |
 |:--------|:---------|
 | ~~Electron desktop app~~ | ✅ Done |
-| React Native mobile app (iOS + Android) | Medium |
-| Signal messenger channel | Low |
+| ~~ForgeAI Companion (Windows native client)~~ | ✅ Done |
+| ~~Config Sync (gateway-to-gateway transfer)~~ | ✅ Done |
 | ~~Voice wake word detection (Porcupine/Picovoice)~~ | ✅ Done |
 | ~~IoT device node protocol (WebSocket)~~ | ✅ Done |
+| React Native mobile app (iOS + Android) | Medium |
+| ForgeAI Companion for macOS / Linux | Medium |
+| Signal messenger channel | Low |
 | ELK/Loki log aggregation | Medium |
 
 See **[ROADMAP.md](./ROADMAP.md)** for the full development history.
@@ -816,7 +868,8 @@ pnpm test    # 38 E2E tests
 | **Dashboard** | React 19, Vite 6, TailwindCSS 4, Lucide Icons |
 | **Channels** | grammY, discord.js, Baileys, Bolt SDK, Bot Framework, Go WebSocket (Node Protocol) |
 | **Browser** | Puppeteer (headless Chromium) |
-| **Build** | tsup, pnpm workspaces (12 packages) |
+| **Companion** | Tauri 2, React, Rust, WebView2 (Windows) |
+| **Build** | tsup, pnpm workspaces (13 packages) |
 | **Test** | Vitest, 53+ E2E API tests |
 | **CI/CD** | GitHub Actions (build → test → deploy) |
 | **Deploy** | Docker multi-stage, docker-compose |

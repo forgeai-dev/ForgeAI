@@ -99,6 +99,14 @@ export function SettingsPage() {
   const [spotifyError, setSpotifyError] = useState('');
   const [spotifyShowSecret, setSpotifyShowSecret] = useState(false);
 
+  // Config Sync state
+  const [syncRemoteUrl, setSyncRemoteUrl] = useState('');
+  const [syncCode, setSyncCode] = useState('');
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'pushing' | 'generating' | 'success' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState('');
+  const [syncGeneratedCode, setSyncGeneratedCode] = useState('');
+  const [syncSummary, setSyncSummary] = useState<{ total: number; categories: Record<string, number> } | null>(null);
+
   // Wake Word state
   const [wakeWordStatus, setWakeWordStatus] = useState<{ enabled: boolean; running: boolean; keyword: string; sensitivity: number; detectionCount: number; lastDetection?: string; uptime: number } | null>(null);
   const [wakeWordStarting, setWakeWordStarting] = useState(false);
@@ -168,6 +176,61 @@ export function SettingsPage() {
       setNodeConnInfo(null);
     }
   }, [nodeConfigured]);
+
+  // Load Config Sync export summary
+  const loadSyncSummary = useCallback(() => {
+    fetch('/api/config/export-summary').then(r => r.json()).then((d: any) => {
+      if (d.success) setSyncSummary({ total: d.total, categories: d.categories });
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadSyncSummary(); }, [loadSyncSummary]);
+
+  const handleSyncPush = async () => {
+    if (!syncRemoteUrl.trim() || !syncCode.trim()) return;
+    setSyncStatus('pushing');
+    setSyncMessage('');
+    try {
+      const resp = await fetch('/api/config/sync-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remoteUrl: syncRemoteUrl.trim(), syncCode: syncCode.trim() }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        setSyncStatus('success');
+        setSyncMessage(`Pushed ${data.keysTransferred} keys successfully!`);
+        setSyncCode('');
+      } else {
+        setSyncStatus('error');
+        setSyncMessage(data.error || 'Push failed');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setSyncMessage(err.message || 'Network error');
+    }
+  };
+
+  const handleSyncGenerate = async () => {
+    setSyncStatus('generating');
+    setSyncMessage('');
+    setSyncGeneratedCode('');
+    try {
+      const resp = await fetch('/api/config/sync-init', { method: 'POST' });
+      const data = await resp.json();
+      if (data.success) {
+        setSyncGeneratedCode(data.syncCode);
+        setSyncStatus('idle');
+        setSyncMessage(`Code expires in ${data.expiresIn}s. Enter it on the source Gateway.`);
+      } else {
+        setSyncStatus('error');
+        setSyncMessage(data.error || 'Failed to generate code');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setSyncMessage(err.message || 'Network error');
+    }
+  };
 
   const handleSvcSave = async (name: string) => {
     const val = svcKeys[name];
@@ -1749,6 +1812,71 @@ export function SettingsPage() {
           </section>
         );
       })()}
+
+      {/* Config Sync */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <RefreshCw className="w-5 h-5 text-forge-400" />
+          Config Sync
+        </h2>
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-5">
+          <p className="text-xs text-zinc-500">Securely transfer all Gateway configurations (LLM keys, TTS, system settings) between ForgeAI instances using encrypted one-time sync codes.</p>
+
+          {syncSummary && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
+              <Info className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+              <div className="text-[11px] text-zinc-400">
+                <span className="text-white font-medium">{syncSummary.total} keys</span> stored in Vault
+                {Object.entries(syncSummary.categories).length > 0 && (
+                  <span> — {Object.entries(syncSummary.categories).map(([k, v]) => `${k}: ${v}`).join(', ')}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Push Config to Remote */}
+          <div className="space-y-2">
+            <p className="text-sm text-white font-medium">Push Config to Remote</p>
+            <p className="text-[11px] text-zinc-500">Send this Gateway's config to another Gateway. The remote must have a sync code ready.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="text" placeholder="http://remote-ip:18800" value={syncRemoteUrl} onChange={e => setSyncRemoteUrl(e.target.value)}
+                className="bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+              <input type="text" placeholder="SYNC CODE" maxLength={8} value={syncCode} onChange={e => setSyncCode(e.target.value.toUpperCase())}
+                className="bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+            </div>
+            <button onClick={handleSyncPush} disabled={syncStatus === 'pushing' || !syncRemoteUrl.trim() || !syncCode.trim()}
+              className="px-4 py-2 rounded-lg bg-forge-500 text-white text-sm font-medium hover:bg-forge-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+              {syncStatus === 'pushing' ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending...</> : <><ExternalLink className="w-3.5 h-3.5" /> Push Config</>}
+            </button>
+          </div>
+
+          {/* Generate Receive Code */}
+          <div className="space-y-2 pt-3 border-t border-zinc-800">
+            <p className="text-sm text-white font-medium">Receive from Another Gateway</p>
+            <p className="text-[11px] text-zinc-500">Generate a one-time code so another Gateway can push its config here. Code expires in 5 minutes.</p>
+            <button onClick={handleSyncGenerate} disabled={syncStatus === 'generating'}
+              className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 text-sm font-medium hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+              {syncStatus === 'generating' ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Key className="w-3.5 h-3.5" /> Generate Sync Code</>}
+            </button>
+            {syncGeneratedCode && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-forge-500/10 border border-forge-500/30">
+                <code className="text-lg font-mono font-bold text-forge-400 tracking-[0.3em] select-all">{syncGeneratedCode}</code>
+                <button aria-label="Copy sync code" onClick={() => { navigator.clipboard.writeText(syncGeneratedCode); }}
+                  className="p-1 text-zinc-400 hover:text-white transition-colors">
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Status message */}
+          {syncMessage && (
+            <div className={`text-xs px-3 py-2 rounded-lg ${syncStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : syncStatus === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'}`}>
+              {syncMessage}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Database */}
       <section className="space-y-4">
