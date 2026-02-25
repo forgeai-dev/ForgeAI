@@ -1,6 +1,6 @@
 {
   "name": "@forgeai/companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "ForgeAI Desktop Companion — lightweight native assistant for Windows",

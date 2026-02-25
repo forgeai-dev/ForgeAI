@@ -468,6 +468,88 @@ pub async fn read_screenshot(path: String, gateway_url: Option<String>) -> Resul
     Err(format!("Screenshot not found locally or via Gateway: {}", path))
 }
 
+/// List chat sessions from Gateway (companion-only)
+#[tauri::command]
+pub async fn list_sessions() -> Result<serde_json::Value, String> {
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    let url = format!("{}/api/chat/sessions", creds.gateway_url);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Gateway request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Gateway HTTP {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    // Filter to only companion sessions (by userId)
+    if let Some(sessions) = body["sessions"].as_array() {
+        let companion_id = &creds.companion_id;
+        let filtered: Vec<&serde_json::Value> = sessions
+            .iter()
+            .filter(|s| {
+                s["channelType"].as_str() == Some("companion")
+                    || s["userId"].as_str().map_or(false, |u| u == companion_id)
+            })
+            .collect();
+        Ok(serde_json::json!({ "sessions": filtered }))
+    } else {
+        Ok(body)
+    }
+}
+
+/// Get session history from Gateway
+#[tauri::command]
+pub async fn get_session_history(session_id: String) -> Result<serde_json::Value, String> {
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    let url = format!("{}/api/chat/history/{}", creds.gateway_url, session_id);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Gateway request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Gateway HTTP {}", resp.status()));
+    }
+
+    resp.json().await.map_err(|e| format!("Invalid response: {}", e))
+}
+
+/// Delete a session from Gateway
+#[tauri::command]
+pub async fn delete_session(session_id: String) -> Result<serde_json::Value, String> {
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    let url = format!("{}/api/chat/sessions/{}", creds.gateway_url, session_id);
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Gateway request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Gateway HTTP {}", resp.status()));
+    }
+
+    resp.json().await.map_err(|e| format!("Invalid response: {}", e))
+}
+
 /// List available audio input/output devices
 #[tauri::command]
 pub fn list_audio_devices() -> Result<serde_json::Value, String> {

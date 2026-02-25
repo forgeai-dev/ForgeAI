@@ -66,6 +66,9 @@ fn main() {
             commands::voice_stop,
             commands::voice_speak,
             commands::read_screenshot,
+            commands::list_sessions,
+            commands::get_session_history,
+            commands::delete_session,
             commands::list_audio_devices,
         ])
         .setup(|app| {
