@@ -1265,6 +1265,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     const sessionId = body.sessionId ?? generateId('sess');
     const userId = body.userId ?? 'webchat-user';
+    const channelType = body.channelType || 'webchat';
 
     try {
       // ── Universal chat commands ──
@@ -1552,6 +1553,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       message?: string;
       sessionId?: string;
       userId?: string;
+      channelType?: string;
     };
 
     if (!body.message || typeof body.message !== 'string') {
