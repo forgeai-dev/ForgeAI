@@ -254,6 +254,7 @@ export class Gateway {
       '/setup', '/api/setup/smtp', '/api/setup/init-2fa', '/api/setup/complete',
       '/api/googlechat/webhook',
       '/api/companion/pair',
+      '/api/config/sync-receive',  // Has own auth: sync code + AES-256-GCM encryption
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
     const AUTH_EXEMPT_PREFIX = [
