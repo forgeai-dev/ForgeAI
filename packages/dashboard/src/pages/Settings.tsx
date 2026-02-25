@@ -180,7 +180,7 @@ export function SettingsPage() {
   // Load Config Sync export summary
   const loadSyncSummary = useCallback(() => {
     fetch('/api/config/export-summary').then(r => r.json()).then((d: any) => {
-      if (d.success) setSyncSummary({ total: d.total, categories: d.categories });
+      if (d.totalEntries != null) setSyncSummary({ total: d.totalEntries, categories: d.categories });
     }).catch(() => {});
   }, []);
 
@@ -199,7 +199,7 @@ export function SettingsPage() {
       const data = await resp.json();
       if (data.success) {
         setSyncStatus('success');
-        setSyncMessage(`Pushed ${data.keysTransferred} keys successfully!`);
+        setSyncMessage(`Pushed ${data.pushed ?? '?'} keys successfully!`);
         setSyncCode('');
       } else {
         setSyncStatus('error');
