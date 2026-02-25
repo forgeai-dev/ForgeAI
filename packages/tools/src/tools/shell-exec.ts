@@ -84,8 +84,10 @@ const HARD_BLOCKED_REGEX = [
   /dd\s+.*of=\/dev\/(?:sd|hd|nvme|vd|loop)/i,
   // mkfs on real devices
   /mkfs\.\w+\s+\/dev\/(?:sd|hd|nvme|vd)/i,
-  // Windows: wipe system directories
-  /(?:remove-item|del|rd|rmdir)\s+.*(?:c:\\windows|c:\\users|system32)/i,
+  // Windows: wipe system directories (c:\windows, system32)
+  /(?:remove-item|del|rd|rmdir)\s+.*(?:c:\\windows|system32)/i,
+  // Windows: wipe ALL user profiles (only blocks c:\users root, NOT c:\users\<name>\subdir)
+  /(?:remove-item|del|rd|rmdir)\s+[^\S]*["']?c:\\users["']?\s*(?:$|[-\/;|&>])/i,
 ];
 
 // Patterns that are logged as HIGH RISK but always allowed (just audit trail)

@@ -1,5 +1,5 @@
 import { resolve, join, dirname, basename } from 'node:path';
-import { readFile, writeFile, readdir, stat, mkdir, unlink, rename, copyFile, chmod } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdir, unlink, rm, rename, copyFile, chmod } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
@@ -10,14 +10,16 @@ const IS_WINDOWS = process.platform === 'win32';
 // ─── OS-critical paths: block destructive operations (delete/write) ───
 // The agent CAN read these paths for inspection, but cannot delete or overwrite them.
 const PROTECTED_PATHS_WINDOWS = [
-  /^c:\\windows\\system32/i,
-  /^c:\\windows\\syswow64/i,
-  /^c:\\windows\\winsxs/i,
-  /^c:\\windows\\boot/i,
-  /^c:\\windows\\servicing/i,
-  /^c:\\boot/i,
-  /^c:\\recovery/i,
-  /^c:\\\\windows\\system32/i,
+  /^c:\\windows$/i,
+  /^c:\\windows\\/i,
+  /^c:\\boot$/i,
+  /^c:\\boot\\/i,
+  /^c:\\recovery$/i,
+  /^c:\\recovery\\/i,
+  /^c:\\efi$/i,
+  /^c:\\efi\\/i,
+  /^c:\\\$recycle\.bin/i,
+  /^c:\\system volume information/i,
 ];
 const PROTECTED_PATHS_LINUX = [
   /^\/boot\//,
@@ -145,8 +147,13 @@ On Windows: silent operations without opening any visible window.`,
           }
 
           case 'delete': {
-            await unlink(targetPath);
-            return { deleted: true, path: targetPath };
+            const s = await stat(targetPath);
+            if (s.isDirectory()) {
+              await rm(targetPath, { recursive: true, force: true });
+            } else {
+              await unlink(targetPath);
+            }
+            return { deleted: true, path: targetPath, type: s.isDirectory() ? 'directory' : 'file' };
           }
 
           case 'exists': {

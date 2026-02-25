@@ -160,12 +160,14 @@ pub fn is_blocked_command(command: &str) -> Option<String> {
     }
 
     // Check for recursive delete on root or system dirs
+    // NOTE: these only block drive-root targets (e.g. C:\), NOT subdirectories
     let dangerous_patterns = vec![
-        Regex::new(r"(?i)rm\s+-rf?\s+/").ok(),
-        Regex::new(r"(?i)del\s+/[sfq]+\s+[a-z]:\\").ok(),
-        Regex::new(r"(?i)rmdir\s+/[sq]+\s+[a-z]:\\").ok(),
-        Regex::new(r"(?i)remove-item\s+.*-recurse.*-force.*[a-z]:\\").ok(),
+        Regex::new(r"(?i)rm\s+-rf?\s+/\s*$").ok(),
+        Regex::new(r"(?i)del\s+/[sfq]+\s+[a-z]:\\\s*$").ok(),
+        Regex::new(r"(?i)rmdir\s+/[sq]+\s+[a-z]:\\\s*$").ok(),
+        Regex::new(r#"(?i)remove-item\s+["']?[a-z]:\\["']?\s+-recurse"#).ok(),
         Regex::new(r"(?i)format\s+[a-z]:").ok(),
+        Regex::new(r"(?i)(?:remove-item|del|rd|rmdir)\s+.*(?:c:\\windows|system32)").ok(),
     ];
 
     for pattern in dangerous_patterns.iter().flatten() {
@@ -242,22 +244,14 @@ pub fn check_file_operation(operation: &str, path: &str) -> SafetyVerdict {
         };
     }
 
-    // Delete operations need extra scrutiny
+    // Delete operations: allowed anywhere that's not a protected system path
+    // The is_protected_path check above already blocks C:\Windows, System32, etc.
     if op == "delete" || op == "remove" || op == "rmdir" {
-        if !is_user_directory(path) {
-            return SafetyVerdict {
-                allowed: false,
-                risk: RiskLevel::Blocked,
-                reason: format!("BLOCKED: Cannot delete '{}' — outside user directory", path),
-                requires_confirmation: false,
-            };
-        }
-
         return SafetyVerdict {
             allowed: true,
-            risk: RiskLevel::High,
-            reason: format!("Delete operation on '{}' requires confirmation", path),
-            requires_confirmation: true,
+            risk: RiskLevel::Medium,
+            reason: format!("Delete operation on '{}' — path is not system-protected", path),
+            requires_confirmation: false,
         };
     }
 
