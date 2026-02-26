@@ -92,30 +92,37 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version packages/companion/src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Upload Companion to unified project release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: companion-v${{ steps.version.outputs.version }}
-          name: ForgeAI Companion v${{ steps.version.outputs.version }}
+          # IMPORTANT: Companion uses the unified project version tag (v1.2.0, v1.3.0, etc.)
+          # NEVER create separate companion-specific tags (companion-v1.x.x).
+          # The Companion is part of the monorepo and follows the same release lifecycle.
+          tag_name: v${{ steps.version.outputs.version }}
+          name: ForgeAI v${{ steps.version.outputs.version }}
           body: |
-            ## ForgeAI Desktop Companion v${{ steps.version.outputs.version }}
+            ## ForgeAI v${{ steps.version.outputs.version }}
 
-            Lightweight native Windows assistant (~15MB).
+            ### ForgeAI Companion (Windows Desktop Client)
 
-            ### Installation
-            - **MSI Installer** — Standard Windows installer (recommended)
-            - **NSIS Installer** — Alternative installer with more options
+            Lightweight native Windows assistant (~15MB) built with Tauri 2 + React + Rust.
 
-            ### Requirements
+            **Installation:**
+            - **NSIS Installer** (.exe) — Recommended, includes auto-updater
+            - **MSI Installer** (.msi) — Standard Windows installer
+
+            **Requirements:**
             - Windows 10/11 (64-bit)
             - WebView2 Runtime (included in Windows 11, auto-installed on Windows 10)
 
-            ### Features
-            - System tray assistant with wake word detection ("Hey Forge")
-            - Voice input/output (STT/TTS)
-            - Local file management, app control, shell commands
-            - Anti-disaster safety system (protects system files)
-            - Secure WebSocket connection to ForgeAI Gateway (local or VPS)
+            **Features:**
+            - Dual environment routing (control server + Windows PC simultaneously)
+            - Streaming heartbeat (no timeout on complex multi-step tasks)
+            - Desktop automation (folders, files, apps, screenshots, shell commands)
+            - Voice mode with wake word detection ("Hey Forge") + STT/TTS
+            - Config Sync (transfer settings between Gateways)
+            - Smart safety system (protects OS-critical paths)
+            - Real-time agent progress via WebSocket
           files: |
             artifacts/msi/*
             artifacts/nsis/*
