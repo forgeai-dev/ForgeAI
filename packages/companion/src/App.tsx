@@ -408,8 +408,7 @@ export default function App() {
           timestamp: Date.now(),
         },
       ]);
-      // Auto-start wake word detection
-      startWakeWord();
+      // Wake word is OFF by default — user can enable in Settings
     } catch (e) {
       setPairError(String(e));
     }

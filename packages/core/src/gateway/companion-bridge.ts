@@ -36,7 +36,7 @@ const ACTION_TIMEOUT_MS = 120_000; // 2 minutes — some commands take time
 const DELEGATED_TOOLS: Record<string, string> = {
   'shell_exec': 'shell',
   'file_manager': 'file_manager',
-  'desktop_automation': 'desktop_automation',
+  'desktop': 'desktop',
 };
 
 export class CompanionBridge {
@@ -169,15 +169,17 @@ export class CompanionBridge {
         };
       }
 
-      case 'desktop_automation': {
-        const action = String(params['action'] || 'system_info');
+      case 'desktop': {
         return {
-          action,
+          action: 'desktop',
           params: {
-            app_name: params['app_name'],
-            process_name: params['process_name'],
-            command: params['command'],
-            path: params['path'],
+            action: params['action'],
+            target: params['target'],
+            text: params['text'],
+            x: params['x'],
+            y: params['y'],
+            button: params['button'],
+            delay: params['delay'],
           },
         };
       }

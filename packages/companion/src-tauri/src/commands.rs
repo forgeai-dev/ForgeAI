@@ -467,17 +467,21 @@ async fn gateway_ws_loop() {
                                             let tx_clone = tx.clone();
                                             let req_id = request_id.clone();
                                             tokio::task::spawn_blocking(move || {
-                                                let action_req = ActionRequest {
-                                                    action: action_clone.clone(),
-                                                    path: params.get("path").and_then(|v| v.as_str()).map(String::from),
-                                                    command: params.get("command").and_then(|v| v.as_str()).map(String::from),
-                                                    content: params.get("content").and_then(|v| v.as_str()).map(String::from),
-                                                    process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
-                                                    app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
-                                                    confirmed: true,
+                                                // Desktop actions get raw params; others use ActionRequest
+                                                let result = if action_clone == "desktop" {
+                                                    local_actions::execute_desktop(&params)
+                                                } else {
+                                                    let action_req = ActionRequest {
+                                                        action: action_clone.clone(),
+                                                        path: params.get("path").and_then(|v| v.as_str()).map(String::from),
+                                                        command: params.get("command").and_then(|v| v.as_str()).map(String::from),
+                                                        content: params.get("content").and_then(|v| v.as_str()).map(String::from),
+                                                        process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
+                                                        app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
+                                                        confirmed: true,
+                                                    };
+                                                    local_actions::execute(&action_req)
                                                 };
-
-                                                let result = local_actions::execute(&action_req);
                                                 log::info!("[GatewayWS] <<< Action result: {} success={} output_len={}",
                                                     action_clone, result.success, result.output.len());
 
