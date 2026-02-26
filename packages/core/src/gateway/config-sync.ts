@@ -273,11 +273,19 @@ export function registerConfigSyncRoutes(app: FastifyInstance, vault: Vault): vo
         source: configBundle.exportedAt,
       });
 
+      // Auto-restart Gateway after successful import so new config takes effect
+      if (result.imported > 0) {
+        logger.info('Auto-restarting Gateway to apply imported config...');
+        setTimeout(() => {
+          process.exit(0); // Docker/systemd will auto-restart the process
+        }, 2000); // 2s delay to allow the response to be sent first
+      }
+
       return {
         success: true,
         imported: result.imported,
         skipped: result.skipped,
-        message: `Imported ${result.imported} config entries. Restart Gateway to apply changes.`,
+        message: `Imported ${result.imported} config entries. Gateway is restarting to apply changes.`,
       };
     } catch (err) {
       logger.warn('Config sync decryption failed (wrong code or corrupted bundle)', { ip, error: String(err) });
