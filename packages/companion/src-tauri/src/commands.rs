@@ -121,10 +121,15 @@ pub async fn pair_with_gateway(gateway_url: String, pairing_code: String) -> Res
         .to_string();
     let role = body["role"].as_str().unwrap_or("user").to_string();
 
+    let auth_token = body["authToken"]
+        .as_str()
+        .map(|s| s.to_string());
+
     let creds = crate::connection::CompanionCredentials {
         gateway_url: gateway_url.trim_end_matches('/').to_string(),
         companion_id,
         role,
+        auth_token,
     };
 
     crate::connection::GatewayConnection::save_credentials(&creds)?;
