@@ -188,20 +188,38 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
 
     let url = format!("{}/api/chat", creds.gateway_url);
 
-    let client = reqwest::Client::new();
-    let req = client
-        .post(&url)
-        .json(&serde_json::json!({
-            "message": message,
-            "sessionId": session_id,
-            "userId": creds.companion_id,
-            "channelType": "companion",
-        }))
-        .timeout(std::time::Duration::from_secs(120));
-    let resp = with_auth(req, &creds)
-        .send()
-        .await
-        .map_err(|e| format!("Gateway request failed: {}", e))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let payload = serde_json::json!({
+        "message": message,
+        "sessionId": session_id,
+        "userId": creds.companion_id,
+        "channelType": "companion",
+    });
+
+    let mut last_err = String::new();
+    let mut resp_opt = None;
+    for attempt in 0..2 {
+        let mut req = client.post(&url).json(&payload);
+        if let Some(ref token) = creds.auth_token {
+            req = req.header("Cookie", format!("forgeai_session={}", token));
+        }
+        match req.send().await {
+            Ok(r) => { resp_opt = Some(r); break; }
+            Err(e) => {
+                last_err = format!("{}", e);
+                log::warn!("chat_send: Gateway request attempt {} failed: {}", attempt + 1, last_err);
+                if attempt == 0 {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+
+    let resp = resp_opt.ok_or(format!("Gateway unreachable after 2 attempts: {}", last_err))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
