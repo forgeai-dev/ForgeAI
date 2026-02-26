@@ -262,6 +262,7 @@ export class Gateway {
     const AUTH_EXEMPT_PREFIX = [
       '/api/webhooks/receive/',   // Inbound webhook receiver
       '/assets/',                 // Static dashboard assets (JS/CSS)
+      '/sites/',                  // Published static sites (workspace)
     ];
 
     // ─── Smart Security: localhost vs external detection ───
