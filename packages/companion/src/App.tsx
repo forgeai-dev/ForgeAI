@@ -20,6 +20,7 @@ interface CompanionStatus {
   connected: boolean;
   gateway_url: string | null;
   companion_id: string | null;
+  auth_token: string | null;
   safety_active: boolean;
   version: string;
 }
@@ -276,7 +277,12 @@ export default function App() {
     if (!gwUrl) return;
 
     const companionId = status?.companion_id || '';
-    const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws' + (companionId ? `?companionId=${companionId}` : '');
+    const authToken = status?.auth_token || '';
+    const params = new URLSearchParams();
+    if (companionId) params.set('companionId', companionId);
+    if (authToken) params.set('token', authToken);
+    const qs = params.toString();
+    const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws' + (qs ? `?${qs}` : '');
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
@@ -364,7 +370,7 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [status?.gateway_url, status?.companion_id]);
+  }, [status?.gateway_url, status?.companion_id, status?.auth_token]);
 
   // Subscribe to session when sessionId changes (WS already connected)
   useEffect(() => {
