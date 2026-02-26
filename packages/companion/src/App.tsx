@@ -19,6 +19,7 @@ const invoke = (cmd: string, args?: Record<string, unknown>) =>
 interface CompanionStatus {
   connected: boolean;
   gateway_url: string | null;
+  companion_id: string | null;
   safety_active: boolean;
   version: string;
 }
@@ -273,7 +274,8 @@ export default function App() {
     const gwUrl = status?.gateway_url;
     if (!gwUrl || !sessionId) return;
 
-    const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws';
+    const companionId = status?.companion_id || '';
+    const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws' + (companionId ? `?companionId=${companionId}` : '');
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
@@ -283,13 +285,47 @@ export default function App() {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log('[ForgeAI] WS connected');
+          console.log('[ForgeAI] WS connected', companionId ? `(companion: ${companionId})` : '');
           ws.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
         };
 
         ws.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
+
+            // Handle action_request from Gateway — execute locally via Rust and send result back
+            if (msg.type === 'action_request' && msg.requestId) {
+              console.log('[ForgeAI] Action request:', msg.action, msg.requestId);
+              invoke('execute_action', {
+                request: {
+                  action: msg.action || '',
+                  path: msg.params?.path || null,
+                  command: msg.params?.command || null,
+                  content: msg.params?.content || null,
+                  process_name: msg.params?.process_name || null,
+                  app_name: msg.params?.app_name || null,
+                  confirmed: true,
+                },
+              }).then((result: unknown) => {
+                const r = result as { success: boolean; output: string };
+                ws.send(JSON.stringify({
+                  type: 'action_result',
+                  requestId: msg.requestId,
+                  success: r.success,
+                  output: r.output,
+                }));
+                console.log('[ForgeAI] Action result sent:', msg.action, r.success);
+              }).catch((err: unknown) => {
+                ws.send(JSON.stringify({
+                  type: 'action_result',
+                  requestId: msg.requestId,
+                  success: false,
+                  output: `Companion error: ${err}`,
+                }));
+              });
+              return;
+            }
+
             if (msg.type === 'agent.step' && msg.step) {
               const step = msg.step as AgentStep;
               if (step.type === 'tool_call') {
@@ -324,7 +360,7 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [status?.gateway_url, sessionId]);
+  }, [status?.gateway_url, status?.companion_id, sessionId]);
 
   const loadStatus = async () => {
     try {
