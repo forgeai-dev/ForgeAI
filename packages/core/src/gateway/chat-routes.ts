@@ -1242,6 +1242,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // ─── REST API: Chat ────────────────────────────────
 
   // POST /api/chat — send a message and get a response
+  // Supports streaming mode (stream:true or companion channel) to prevent HTTP timeouts
+  // on long agent runs. Sends periodic heartbeat newlines to keep the connection alive.
   app.post('/api/chat', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as {
       message?: string;
@@ -1251,6 +1253,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       model?: string;
       provider?: string;
       channelType?: string;
+      stream?: boolean;
       image?: { data: string; mimeType: string; filename?: string };
     };
 
@@ -1267,6 +1270,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     const sessionId = body.sessionId ?? generateId('sess');
     const userId = body.userId ?? 'webchat-user';
     const channelType = body.channelType || 'webchat';
+    const useStreaming = body.stream === true || channelType === 'companion';
 
     try {
       // ── Universal chat commands ──
@@ -1350,6 +1354,20 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         }
       }
 
+      // Start heartbeat for streaming mode — sends a space every 10s to keep HTTP alive
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      if (useStreaming) {
+        reply.raw.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked',
+          'Cache-Control': 'no-cache',
+          'X-Streaming': 'true',
+        });
+        heartbeatTimer = setInterval(() => {
+          try { reply.raw.write(' '); } catch { /* connection closed */ }
+        }, 10_000);
+      }
+
       const result = await agentManager.processMessage({
         sessionId,
         userId,
@@ -1360,6 +1378,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         modelOverride: body.model,
         providerOverride: body.provider,
       });
+
+      // Stop heartbeat
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
 
       // Restore original tool executor after companion message processing
       if (originalExecutor && targetAgent) {
@@ -1398,7 +1419,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         timestamp: Date.now(),
       });
 
-      return {
+      const responseBody = {
         id: result.id,
         content: result.content,
         thinking: result.thinking,
@@ -1412,8 +1433,26 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         steps: result.steps,
         toolIterations: result.toolIterations,
       };
+
+      // Streaming mode: write JSON to raw stream and end
+      if (useStreaming) {
+        try {
+          reply.raw.write(JSON.stringify(responseBody));
+          reply.raw.end();
+        } catch { /* connection already closed */ }
+        return;
+      }
+
+      return responseBody;
     } catch (error) {
       logger.error('Chat request failed', error);
+      if (useStreaming) {
+        try {
+          reply.raw.write(JSON.stringify({ error: 'Internal server error' }));
+          reply.raw.end();
+        } catch { /* connection already closed */ }
+        return;
+      }
       reply.status(500).send({ error: 'Internal server error' });
       return;
     }
@@ -1456,6 +1495,19 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       logger.info('Voice chat: STT complete', { text: sttResult.text.substring(0, 100), confidence: sttResult.confidence });
 
       // Step 2: Process message through agent
+      // For voice from Companion: swap tool executor to delegate local actions to Companion via WS
+      const voiceTargetAgent = body.agentId ? agentManager.getAgent(body.agentId) : agentManager.getDefaultAgent();
+      let voiceOriginalExecutor: unknown;
+      if (voiceTargetAgent && toolRegistry) {
+        const bridge = getCompanionBridge();
+        if (bridge.isConnected(userId)) {
+          voiceOriginalExecutor = (voiceTargetAgent as any).toolExecutor;
+          const companionExecutor = new CompanionToolExecutor(toolRegistry, bridge, userId);
+          voiceTargetAgent.setToolExecutor(companionExecutor);
+          logger.info('Companion tool executor active for voice', { userId, sessionId });
+        }
+      }
+
       const result = await agentManager.processMessage({
         sessionId,
         userId,
@@ -1463,6 +1515,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         channelType: 'voice',
         agentId: body.agentId,
       });
+
+      // Restore original tool executor after voice message processing
+      if (voiceOriginalExecutor && voiceTargetAgent) {
+        voiceTargetAgent.setToolExecutor(voiceOriginalExecutor as any);
+      }
 
       // Step 3: Optional TTS — synthesize response to audio
       let ttsAudio: string | undefined;
@@ -2322,6 +2379,57 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
     reply.header('Content-Type', contentType);
     reply.header('Cache-Control', 'public, max-age=3600');
+    return reply.send(createReadStream(filePath));
+  });
+
+  // ─── REST API: Serve Static Sites from Workspace ───
+  // Allows agent-created websites in .forgeai/workspace/<project>/ to be accessed via
+  // http://<server>:18800/sites/<project>/ — no extra ports needed.
+
+  app.get('/sites/*', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { resolve, normalize, sep, join } = await import('node:path');
+    const { createReadStream, existsSync, statSync } = await import('node:fs');
+    const urlPath = (request.params as { '*': string })['*'] || '';
+
+    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    let filePath = normalize(resolve(workspaceDir, urlPath));
+
+    // Security: prevent directory traversal
+    if (!filePath.startsWith(workspaceDir + sep) && filePath !== workspaceDir) {
+      reply.status(403).send({ error: 'Access denied' });
+      return;
+    }
+
+    // If path is a directory, try serving index.html
+    if (existsSync(filePath) && statSync(filePath).isDirectory()) {
+      const indexPath = join(filePath, 'index.html');
+      if (existsSync(indexPath)) {
+        filePath = indexPath;
+      } else {
+        reply.status(404).send({ error: 'No index.html found in directory' });
+        return;
+      }
+    }
+
+    if (!existsSync(filePath)) {
+      reply.status(404).send({ error: 'File not found' });
+      return;
+    }
+
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const mimeTypes: Record<string, string> = {
+      html: 'text/html', css: 'text/css', js: 'application/javascript',
+      json: 'application/json', txt: 'text/plain',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+      webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon',
+      woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+      mp4: 'video/mp4', mp3: 'audio/mpeg', pdf: 'application/pdf',
+    };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    reply.header('Content-Type', contentType);
+    reply.header('Cache-Control', 'public, max-age=300');
+    reply.header('Access-Control-Allow-Origin', '*');
     return reply.send(createReadStream(filePath));
   });
 

@@ -12,6 +12,8 @@
 
 import { createLogger, generateId } from '@forgeai/shared';
 import type { ToolExecutor } from '@forgeai/agent';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const logger = createLogger('Core:CompanionBridge');
 
@@ -36,7 +38,7 @@ const ACTION_TIMEOUT_MS = 120_000; // 2 minutes — some commands take time
 const DELEGATED_TOOLS: Record<string, string> = {
   'shell_exec': 'shell',
   'file_manager': 'file_manager',
-  'desktop_automation': 'desktop_automation',
+  'desktop': 'desktop',
 };
 
 export class CompanionBridge {
@@ -157,27 +159,43 @@ export class CompanionBridge {
         };
 
       case 'file_manager': {
-        // file_manager tool has an 'operation' param that maps to local_actions
-        const op = String(params['operation'] || 'read_file');
+        // file_manager tool uses 'action' param: read, write, list, delete, mkdir, copy, move, exists, info, disk_info
+        // Map to Companion local_actions names
+        const fmAction = String(params['action'] || 'read');
+        const actionMap: Record<string, string> = {
+          read: 'read_file',
+          write: 'write_file',
+          list: 'list_dir',
+          delete: 'delete_file',
+          mkdir: 'create_dir',
+          exists: 'file_exists',
+          info: 'file_info',
+          copy: 'copy_file',
+          move: 'move_file',
+          disk_info: 'disk_usage',
+        };
+        // For copy/move, Companion uses req.content as the destination path
+        const isCopyMove = fmAction === 'copy' || fmAction === 'move';
         return {
-          action: op,
+          action: actionMap[fmAction] || fmAction,
           params: {
             path: params['path'],
-            content: params['content'],
-            destination: params['destination'],
+            content: isCopyMove ? params['dest'] : params['content'],
           },
         };
       }
 
-      case 'desktop_automation': {
-        const action = String(params['action'] || 'system_info');
+      case 'desktop': {
         return {
-          action,
+          action: 'desktop',
           params: {
-            app_name: params['app_name'],
-            process_name: params['process_name'],
-            command: params['command'],
-            path: params['path'],
+            action: params['action'],
+            target: params['target'],
+            text: params['text'],
+            x: params['x'],
+            y: params['y'],
+            button: params['button'],
+            delay: params['delay'],
           },
         };
       }
@@ -197,6 +215,8 @@ export class CompanionToolExecutor implements ToolExecutor {
   private inner: ToolExecutor;
   private bridge: CompanionBridge;
   private companionId: string;
+  /** Tells the agent runtime that commands execute on Windows, not the Gateway's Linux */
+  readonly companionPlatform = 'win32';
 
   constructor(inner: ToolExecutor, bridge: CompanionBridge, companionId: string) {
     this.inner = inner;
@@ -209,13 +229,52 @@ export class CompanionToolExecutor implements ToolExecutor {
   }
 
   async execute(name: string, params: Record<string, unknown>, userId?: string) {
-    // If this tool should be delegated AND the companion is connected, delegate
-    if (CompanionBridge.isDelegatedTool(name) && this.bridge.isConnected(this.companionId)) {
+    // Routing logic: delegate to Companion only when explicitly requested or for desktop tool
+    // - desktop: always delegate (server has no GUI)
+    // - shell_exec / file_manager: delegate only when target="companion"
+    const target = String(params['target'] || 'server').toLowerCase();
+    const shouldDelegate =
+      (name === 'desktop' || target === 'companion') &&
+      CompanionBridge.isDelegatedTool(name) &&
+      this.bridge.isConnected(this.companionId);
+
+    if (shouldDelegate) {
       const mapped = CompanionBridge.mapToolToAction(name, params);
 
       logger.info(`Delegating ${name} to Companion`, { companionId: this.companionId, action: mapped.action });
 
       const result = await this.bridge.requestAction(this.companionId, mapped.action, mapped.params);
+
+      // If the Companion sent back a screenshot with base64 image data, save it on the Gateway
+      let savedPath: string | undefined;
+      let savedFilename: string | undefined;
+      if (result.success && result.output) {
+        try {
+          const parsed = JSON.parse(result.output);
+          if (parsed.image_base64 && parsed.filename) {
+            const screenshotDir = resolve(process.cwd(), '.forgeai', 'screenshots');
+            if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
+            savedFilename = parsed.filename;
+            savedPath = resolve(screenshotDir, savedFilename!);
+            writeFileSync(savedPath, Buffer.from(parsed.image_base64, 'base64'));
+            logger.info('Companion screenshot saved on Gateway', { path: savedPath });
+          }
+        } catch { /* not JSON or no image — that's fine */ }
+      }
+
+      // If we saved a screenshot, return in the same format the server-side DesktopAutomationTool uses
+      if (savedPath) {
+        return {
+          success: result.success,
+          data: {
+            output: 'Screenshot captured from Windows Companion',
+            path: savedPath,
+            filename: savedFilename,
+            delegatedTo: 'companion',
+          },
+          duration: 0,
+        };
+      }
 
       return {
         success: result.success,

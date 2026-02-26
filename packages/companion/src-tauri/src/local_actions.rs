@@ -25,6 +25,7 @@ pub struct ActionRequest {
     pub content: Option<String>,
     pub process_name: Option<String>,
     pub app_name: Option<String>,
+    pub cwd: Option<String>,
     pub confirmed: bool,
 }
 
@@ -325,9 +326,15 @@ fn run_shell(req: &ActionRequest) -> ActionResult {
         return ActionResult::needs_confirm(verdict);
     }
 
-    let output = Command::new("cmd")
-        .args(["/C", command])
-        .output();
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+    if let Some(cwd) = &req.cwd {
+        let cwd_path = std::path::Path::new(cwd);
+        if cwd_path.exists() {
+            cmd.current_dir(cwd_path);
+        }
+    }
+    let output = cmd.output();
 
     match output {
         Ok(out) => {
@@ -471,6 +478,371 @@ fn disk_usage() -> ActionResult {
         ),
         Err(e) => ActionResult::err(format!("Failed: {}", e), safe_verdict()),
     }
+}
+
+// ─── Desktop Automation (Windows PowerShell) ─────────
+
+/// Execute a desktop automation action with raw JSON params.
+/// Called directly from the WS loop for action="desktop".
+pub fn execute_desktop(params: &serde_json::Value) -> ActionResult {
+    let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+    let target = params.get("target").and_then(|v| v.as_str()).unwrap_or("");
+    let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
+    let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
+    let button = params.get("button").and_then(|v| v.as_str()).unwrap_or("left");
+    let delay = params.get("delay").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    if action.is_empty() {
+        return ActionResult::err("desktop action is required".into(), safe_verdict());
+    }
+
+    // Optional delay before action
+    if delay > 0 && action != "wait" {
+        std::thread::sleep(std::time::Duration::from_millis(delay.min(10_000)));
+    }
+
+    match action {
+        "list_windows" => desktop_list_windows(),
+        "focus_window" => desktop_focus_window(target),
+        "open_app" => desktop_open_app(target),
+        "send_keys" | "key_combo" => desktop_send_keys(text),
+        "type_text" => desktop_type_text(text),
+        "click" => desktop_click(x, y, button),
+        "screenshot" => desktop_screenshot(target),
+        "read_screen" => desktop_read_screen(target),
+        "read_window_text" => desktop_read_window_text(target),
+        "get_clipboard" => desktop_get_clipboard(),
+        "wait" => {
+            let ms = if !target.is_empty() {
+                target.parse::<u64>().unwrap_or(1000)
+            } else if delay > 0 { delay } else { 1000 };
+            std::thread::sleep(std::time::Duration::from_millis(ms.min(10_000)));
+            ActionResult::ok(format!("WAITED: {}ms", ms), safe_verdict())
+        }
+        _ => ActionResult::err(format!("Unknown desktop action: {}", action), safe_verdict()),
+    }
+}
+
+fn run_powershell(script: &str) -> ActionResult {
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let combined = if stderr.is_empty() {
+                stdout
+            } else if stdout.is_empty() {
+                format!("[STDERR] {}", stderr)
+            } else {
+                format!("{}\n[STDERR] {}", stdout, stderr)
+            };
+            let truncated = if combined.len() > 30_000 {
+                format!("{}...[truncated]", &combined[..30_000])
+            } else {
+                combined
+            };
+            ActionResult::ok(truncated, safe_verdict())
+        }
+        Err(e) => ActionResult::err(format!("PowerShell failed: {}", e), safe_verdict()),
+    }
+}
+
+fn desktop_list_windows() -> ActionResult {
+    let script = r#"
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text;
+public class WinAPI {
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lp);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    public delegate bool EnumWindowsProc(IntPtr h, IntPtr lp);
+    public static string GetTitle(IntPtr h) { int l=GetWindowTextLength(h); if(l==0)return""; var sb=new StringBuilder(l+1); GetWindowText(h,sb,sb.Capacity); return sb.ToString(); }
+}
+"@
+$list = @()
+[WinAPI]::EnumWindows({ param($h,$l)
+    if([WinAPI]::IsWindowVisible($h)) {
+        $t=[WinAPI]::GetTitle($h)
+        if($t -ne "") {
+            $pid=[uint32]0; [WinAPI]::GetWindowThreadProcessId($h,[ref]$pid)|Out-Null
+            $p=Get-Process -Id $pid -EA SilentlyContinue
+            $list += [PSCustomObject]@{Title=$t; Process=if($p){$p.ProcessName}else{"?"}; PID=$pid}
+        }
+    }; $true
+}, [IntPtr]::Zero)|Out-Null
+$list | ConvertTo-Json -Compress
+"#;
+    run_powershell(script)
+}
+
+fn desktop_focus_window(target: &str) -> ActionResult {
+    if target.is_empty() {
+        return ActionResult::err("target is required for focus_window".into(), safe_verdict());
+    }
+    let safe = target.replace('\'', "''");
+    let script = format!(r#"
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text;
+public class WinAPI {{
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lp);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    public delegate bool EnumWindowsProc(IntPtr h, IntPtr lp);
+    public static string GetTitle(IntPtr h) {{ int l=GetWindowTextLength(h); if(l==0)return""; var sb=new StringBuilder(l+1); GetWindowText(h,sb,sb.Capacity); return sb.ToString(); }}
+}}
+"@
+$found=$false
+[WinAPI]::EnumWindows({{ param($h,$l)
+    if([WinAPI]::IsWindowVisible($h)) {{
+        $t=[WinAPI]::GetTitle($h)
+        if($t -like "*{safe}*") {{
+            [WinAPI]::ShowWindow($h,9)|Out-Null; Start-Sleep -Ms 200
+            [WinAPI]::SetForegroundWindow($h)|Out-Null
+            Write-Output "FOCUSED: $t"
+            $script:found=$true; return $false
+        }}
+    }}; $true
+}}, [IntPtr]::Zero)|Out-Null
+if(-not $found) {{ Write-Output "NOT_FOUND: No window matching '*{safe}*'" }}
+"#);
+    run_powershell(&script)
+}
+
+fn desktop_open_app(target: &str) -> ActionResult {
+    if target.is_empty() {
+        return ActionResult::err("target is required for open_app".into(), safe_verdict());
+    }
+    let safe = target.replace('"', "`\"");
+    let script = format!(
+        "Start-Process \"{}\" -ErrorAction Stop; Start-Sleep -Seconds 2; Write-Output \"OPENED: {}\"",
+        safe, safe
+    );
+    run_powershell(&script)
+}
+
+fn desktop_send_keys(keys: &str) -> ActionResult {
+    if keys.is_empty() {
+        return ActionResult::err("text is required for send_keys".into(), safe_verdict());
+    }
+    let escaped = keys.replace('"', "`\"");
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Ms 300; [System.Windows.Forms.SendKeys]::SendWait(\"{}\"); Write-Output \"SENT_KEYS: {}\"",
+        escaped, &keys[..keys.len().min(50)]
+    );
+    run_powershell(&script)
+}
+
+fn desktop_type_text(text: &str) -> ActionResult {
+    if text.is_empty() {
+        return ActionResult::err("text is required for type_text".into(), safe_verdict());
+    }
+    let safe = text.replace('"', "`\"").replace('$', "`$");
+    let display = &text[..text.len().min(60)].replace('"', "'");
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Ms 200; [System.Windows.Forms.Clipboard]::SetText(\"{}\"); Start-Sleep -Ms 100; [System.Windows.Forms.SendKeys]::SendWait(\"^v\"); Write-Output \"TYPED: {}\"",
+        safe, display
+    );
+    run_powershell(&script)
+}
+
+fn desktop_click(x: i32, y: i32, button: &str) -> ActionResult {
+    let (down, up) = if button == "right" {
+        ("MOUSEEVENTF_RIGHTDOWN", "MOUSEEVENTF_RIGHTUP")
+    } else {
+        ("MOUSEEVENTF_LEFTDOWN", "MOUSEEVENTF_LEFTUP")
+    };
+    let script = format!(r#"
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class MouseAPI {{
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, IntPtr e);
+    public const uint MOUSEEVENTF_LEFTDOWN=2; public const uint MOUSEEVENTF_LEFTUP=4;
+    public const uint MOUSEEVENTF_RIGHTDOWN=8; public const uint MOUSEEVENTF_RIGHTUP=16;
+}}
+"@
+[MouseAPI]::SetCursorPos({x}, {y}); Start-Sleep -Ms 50
+[MouseAPI]::mouse_event([MouseAPI]::{down}, 0,0,0,[IntPtr]::Zero); Start-Sleep -Ms 50
+[MouseAPI]::mouse_event([MouseAPI]::{up}, 0,0,0,[IntPtr]::Zero)
+Write-Output "CLICKED: ({x}, {y}) {button}"
+"#, x=x, y=y, down=down, up=up, button=button);
+    run_powershell(&script)
+}
+
+fn desktop_screenshot(target: &str) -> ActionResult {
+    use base64::Engine;
+
+    let dir = std::env::temp_dir().join("forgeai_screenshots");
+    let _ = std::fs::create_dir_all(&dir);
+    let filename = format!("screenshot_{}.png", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    let path = dir.join(&filename);
+    let path_str = path.to_string_lossy().replace('\\', "\\\\");
+
+    let script = if target.is_empty() {
+        // Full screen
+        format!(r#"
+Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
+$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$b=New-Object System.Drawing.Bitmap($s.Width,$s.Height)
+$g=[System.Drawing.Graphics]::FromImage($b)
+$g.CopyFromScreen(0,0,0,0,[System.Drawing.Size]::new($s.Width,$s.Height))
+$b.Save("{path}")
+$g.Dispose(); $b.Dispose()
+Write-Output "SCREENSHOT: {path} ($($s.Width)x$($s.Height))"
+"#, path=path_str)
+    } else {
+        // Window screenshot using PrintWindow
+        let safe = target.replace('\'', "''");
+        format!(r#"
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text; using System.Drawing;
+public class WinAPI {{
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lp);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
+    public delegate bool EnumWindowsProc(IntPtr h, IntPtr lp);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT {{ public int Left,Top,Right,Bottom; }}
+    public static string GetTitle(IntPtr h) {{ int l=GetWindowTextLength(h); if(l==0)return""; var sb=new StringBuilder(l+1); GetWindowText(h,sb,sb.Capacity); return sb.ToString(); }}
+}}
+"@
+Add-Type -AssemblyName System.Drawing
+$script:found=$false
+[WinAPI]::EnumWindows({{ param($h,$l)
+    if([WinAPI]::IsWindowVisible($h)) {{
+        $t=[WinAPI]::GetTitle($h)
+        if($t -like "*{safe}*") {{
+            $r=New-Object WinAPI+RECT; [WinAPI]::GetWindowRect($h,[ref]$r)|Out-Null
+            $w=$r.Right-$r.Left; $ht=$r.Bottom-$r.Top
+            if($w -gt 0 -and $ht -gt 0) {{
+                $bmp=New-Object System.Drawing.Bitmap($w,$ht)
+                $g=[System.Drawing.Graphics]::FromImage($bmp)
+                $hdc=$g.GetHdc()
+                [WinAPI]::PrintWindow($h,$hdc,2)|Out-Null
+                $g.ReleaseHdc($hdc); $g.Dispose()
+                $bmp.Save("{path}"); $bmp.Dispose()
+                Write-Output "SCREENSHOT: {path} (${{w}}x${{ht}}) [window: $t]"
+                $script:found=$true; return $false
+            }}
+        }}
+    }}; $true
+}}, [IntPtr]::Zero)|Out-Null
+if(-not $found) {{ Write-Output "NOT_FOUND: No window matching '*{safe}*'" }}
+"#, safe=safe, path=path_str)
+    };
+
+    let ps_result = run_powershell(&script);
+    if !ps_result.success {
+        return ps_result;
+    }
+
+    // Read the PNG file and base64-encode it so the Gateway can save + display the image
+    let real_path = path.to_string_lossy().to_string();
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let json_output = serde_json::json!({
+                "output": ps_result.output.trim(),
+                "filename": filename,
+                "image_base64": b64,
+            });
+            ActionResult::ok(json_output.to_string(), safe_verdict())
+        }
+        Err(e) => {
+            // File not found — return the PS output anyway
+            log::warn!("[desktop_screenshot] Could not read {}: {}", real_path, e);
+            ps_result
+        }
+    }
+}
+
+fn desktop_read_screen(target: &str) -> ActionResult {
+    // Screenshot + OCR using Windows OCR API
+    let dir = std::env::temp_dir().join("forgeai_screenshots");
+    let _ = std::fs::create_dir_all(&dir);
+    let filename = format!("ocr_{}.png", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    let path = dir.join(&filename);
+    let path_str = path.to_string_lossy().replace('\\', "\\\\");
+
+    // First take screenshot
+    let screenshot_result = if target.is_empty() {
+        desktop_screenshot("")
+    } else {
+        desktop_screenshot(target)
+    };
+
+    if !screenshot_result.success {
+        return screenshot_result;
+    }
+
+    // Now run OCR on the screenshot
+    let ocr_script = format!(r#"
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null=[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+$null=[Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation,ContentType=WindowsRuntime]
+$null=[Windows.Storage.StorageFile,Windows.Foundation,ContentType=WindowsRuntime]
+$asTaskGeneric=([System.WindowsRuntimeSystemExtensions].GetMethods()|Where-Object{{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'}})[0]
+Function AwaitOp($t,$r){{$task=$asTaskGeneric.MakeGenericMethod($r).Invoke($null,@($t));if(-not $task.Wait(20000)){{throw "timeout"}};$task.Result}}
+try {{
+    $f=AwaitOp ([Windows.Storage.StorageFile]::GetFileFromPathAsync('{path}')) ([Windows.Storage.StorageFile])
+    $s=AwaitOp ($f.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $d=AwaitOp ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($s)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $b=AwaitOp ($d.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $e=[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    if(-not $e){{$e=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))}}
+    if($e){{$r=AwaitOp ($e.RecognizeAsync($b)) ([Windows.Media.Ocr.OcrResult]); Write-Output $r.Text}}
+    else{{Write-Output "OCR_ERROR: No OCR engine available"}}
+}} catch {{ Write-Output "OCR_ERROR: $($_.Exception.Message)" }}
+"#, path=path_str);
+
+    let ocr_result = run_powershell(&ocr_script);
+    // Combine screenshot path and OCR text
+    ActionResult::ok(
+        format!("screenshot={}\ntext:{}", path_str, ocr_result.output),
+        safe_verdict(),
+    )
+}
+
+fn desktop_read_window_text(target: &str) -> ActionResult {
+    if target.is_empty() {
+        return ActionResult::err("target is required for read_window_text".into(), safe_verdict());
+    }
+    let safe = target.replace('\'', "''");
+    let script = format!(r#"
+Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes
+$root=[System.Windows.Automation.AutomationElement]::RootElement
+$wins=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+$tw=$null
+foreach($w in $wins){{ try{{ if($w.Current.Name -like "*{safe}*"){{$tw=$w;break}} }}catch{{}} }}
+if(-not $tw){{ Write-Output "NOT_FOUND: No window matching '*{safe}*'"; return }}
+$texts=@()
+$tc=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text)
+$els=$tw.FindAll([System.Windows.Automation.TreeScope]::Descendants,$tc)
+foreach($el in $els){{ try{{ $n=$el.Current.Name; if($n -and $n.Trim()){{$texts+=$n.Trim()}} }}catch{{}} }}
+$ec=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Edit)
+$edits=$tw.FindAll([System.Windows.Automation.TreeScope]::Descendants,$ec)
+foreach($el in $edits){{ try{{ $vp=$el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern); if($vp -and $vp.Current.Value){{$texts+="[INPUT] "+$vp.Current.Value}} }}catch{{}} }}
+if($texts.Count -eq 0){{ Write-Output "NO_TEXT_FOUND: Window found but no readable text" }}
+else{{ $texts -join [Environment]::NewLine }}
+"#, safe=safe);
+    run_powershell(&script)
+}
+
+fn desktop_get_clipboard() -> ActionResult {
+    run_powershell("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetText()")
 }
 
 // ─── Helpers ─────────────────────────────────────────

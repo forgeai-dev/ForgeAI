@@ -263,6 +263,7 @@ impl GatewayConnection {
                                     content: params.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                     process_name: params.get("process_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                     app_name: params.get("app_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    cwd: params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                     confirmed: true, // Agent-initiated actions are pre-confirmed
                                 };
 

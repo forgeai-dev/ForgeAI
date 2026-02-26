@@ -61,6 +61,7 @@ On Windows: silent operations without opening any visible window.`,
       { name: 'pattern', type: 'string', description: 'Search pattern/glob (for search action)', required: false },
       { name: 'mode', type: 'string', description: 'Permission mode e.g. "755" (for permissions action, Linux only)', required: false },
       { name: 'encoding', type: 'string', description: 'File encoding (default: utf-8)', required: false, default: 'utf-8' },
+      { name: 'target', type: 'string', description: 'Where to execute: "server" (default, Linux/Gateway) or "companion" (user\'s Windows machine via ForgeAI Companion). Only use "companion" when the user explicitly asks to do something on their Windows/local machine.', required: false },
     ],
   };
 

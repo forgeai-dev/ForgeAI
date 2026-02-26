@@ -7,6 +7,16 @@ use base64::Engine as _;
 use crate::local_actions::{self, ActionRequest, ActionResult};
 use crate::safety;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use tokio::sync::Notify;
+
+static GATEWAY_WS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static RECONNECT_NOTIFY: OnceLock<Notify> = OnceLock::new();
+
+fn get_reconnect_notify() -> &'static Notify {
+    RECONNECT_NOTIFY.get_or_init(|| Notify::new())
+}
 
 /// Build a reqwest::RequestBuilder with auth cookie if available
 fn with_auth(builder: reqwest::RequestBuilder, creds: &crate::connection::CompanionCredentials) -> reqwest::RequestBuilder {
@@ -170,7 +180,9 @@ pub fn window_maximize(window: tauri::Window) -> Result<(), String> {
     }
 }
 
-/// Send a chat message to the Gateway and get AI response
+/// Send a chat message to the Gateway and get AI response.
+/// Uses streaming mode: Gateway sends heartbeat spaces to keep connection alive
+/// during long agent runs, then the final JSON result at the end.
 #[tauri::command]
 pub async fn chat_send(message: String, session_id: Option<String>) -> Result<serde_json::Value, String> {
     let creds = crate::connection::GatewayConnection::load_credentials()
@@ -178,20 +190,41 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
 
     let url = format!("{}/api/chat", creds.gateway_url);
 
-    let client = reqwest::Client::new();
-    let req = client
-        .post(&url)
-        .json(&serde_json::json!({
-            "message": message,
-            "sessionId": session_id,
-            "userId": creds.companion_id,
-            "channelType": "companion",
-        }))
-        .timeout(std::time::Duration::from_secs(120));
-    let resp = with_auth(req, &creds)
-        .send()
-        .await
-        .map_err(|e| format!("Gateway request failed: {}", e))?;
+    // No total timeout — Gateway sends heartbeat spaces every 10s to keep alive.
+    // Only connect_timeout to fail fast if server is unreachable.
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let payload = serde_json::json!({
+        "message": message,
+        "sessionId": session_id,
+        "userId": creds.companion_id,
+        "channelType": "companion",
+        "stream": true,
+    });
+
+    let mut last_err = String::new();
+    let mut resp_opt = None;
+    for attempt in 0..2 {
+        let mut req = client.post(&url).json(&payload);
+        if let Some(ref token) = creds.auth_token {
+            req = req.header("Cookie", format!("forgeai_session={}", token));
+        }
+        match req.send().await {
+            Ok(r) => { resp_opt = Some(r); break; }
+            Err(e) => {
+                last_err = format!("{}", e);
+                log::warn!("chat_send: Gateway request attempt {} failed: {}", attempt + 1, last_err);
+                if attempt == 0 {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+
+    let resp = resp_opt.ok_or(format!("Gateway unreachable after 2 attempts: {}", last_err))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -199,10 +232,22 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
         return Err(format!("Gateway HTTP {}: {}", status, body));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Invalid response: {}", e))?;
+    // Response is streamed: heartbeat spaces followed by JSON.
+    // Read full body as text, trim leading spaces, then parse.
+    let raw = resp.text().await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Empty response from Gateway".into());
+    }
+
+    let body: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    // Check for server-side error in response
+    if let Some(err) = body.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("Gateway error: {}", err));
+    }
 
     Ok(body)
 }
@@ -343,6 +388,214 @@ pub fn disconnect() -> Result<String, String> {
     Ok("Disconnected and credentials removed".into())
 }
 
+// ─── Gateway WebSocket Background Loop ──────────────────────────────
+
+/// Spawn the persistent Gateway WebSocket loop (idempotent — only one loop runs)
+pub fn spawn_gateway_ws() {
+    if GATEWAY_WS_ACTIVE.swap(true, Ordering::SeqCst) {
+        log::info!("[GatewayWS] Loop already active");
+        return;
+    }
+    tauri::async_runtime::spawn(async {
+        gateway_ws_loop().await;
+        GATEWAY_WS_ACTIVE.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Tauri command: ensure the Gateway WS is running (called after pairing)
+#[tauri::command]
+pub async fn connect_gateway_ws() -> Result<String, String> {
+    spawn_gateway_ws();
+    Ok("Gateway WS connection started".into())
+}
+
+/// Tauri command: force the WS loop to reconnect with fresh credentials (call after re-pairing)
+#[tauri::command]
+pub async fn force_reconnect_gateway_ws() -> Result<String, String> {
+    log::info!("[GatewayWS] Force reconnect requested");
+    get_reconnect_notify().notify_one();
+    // Wait for old loop to exit, then start fresh
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    GATEWAY_WS_ACTIVE.store(false, Ordering::SeqCst);
+    spawn_gateway_ws();
+    Ok("Reconnect initiated".into())
+}
+
+async fn gateway_ws_loop() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    // Brief delay so the app is fully initialized
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    loop {
+        // Reload credentials each iteration (handles re-pairing)
+        let creds = match crate::connection::GatewayConnection::load_credentials() {
+            Some(c) => c,
+            None => {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                continue;
+            }
+        };
+
+        // Build WS URL with companionId + auth token
+        let ws_base = creds.gateway_url
+            .replace("https://", "wss://")
+            .replace("http://", "ws://");
+        let mut ws_url = format!("{}/ws?companionId={}", ws_base, creds.companion_id);
+        if let Some(ref token) = creds.auth_token {
+            ws_url.push_str(&format!("&token={}", token));
+        }
+
+        log::info!("[GatewayWS] Connecting: companionId={}", creds.companion_id);
+
+        match connect_async(&ws_url).await {
+            Ok((ws_stream, _)) => {
+                log::info!("[GatewayWS] Connected to {}", creds.gateway_url);
+                let (mut write, mut read) = ws_stream.split();
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+                // Send task: forwards outgoing messages to WS
+                let send_handle = tokio::spawn(async move {
+                    while let Some(msg) = rx.recv().await {
+                        if write.send(Message::Text(msg.into())).await.is_err() {
+                            log::error!("[GatewayWS] Write failed, send task exiting");
+                            break;
+                        }
+                    }
+                });
+
+                // Keepalive ping interval (30s)
+                let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                ping_interval.tick().await; // consume initial tick
+
+                // Receive loop with keepalive
+                let mut alive = true;
+                while alive {
+                    tokio::select! {
+                        msg = read.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(text))) => {
+                                    let text_str: String = text.to_string();
+                                    let raw: serde_json::Value = match serde_json::from_str(&text_str) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            log::warn!("[GatewayWS] JSON parse error: {}", e);
+                                            continue;
+                                        }
+                                    };
+                                    let msg_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                                    match msg_type {
+                                        "action_request" => {
+                                            let request_id = raw.get("requestId")
+                                                .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let action = raw.get("action")
+                                                .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let params = raw.get("params")
+                                                .cloned().unwrap_or(serde_json::json!({}));
+
+                                            log::info!("[GatewayWS] >>> Action request: {} (id={})", action, request_id);
+
+                                            // Execute in a blocking thread so we don't stall the async loop
+                                            let action_clone = action.clone();
+                                            let tx_clone = tx.clone();
+                                            let req_id = request_id.clone();
+                                            tokio::task::spawn_blocking(move || {
+                                                // Desktop actions get raw params; others use ActionRequest
+                                                let result = if action_clone == "desktop" {
+                                                    local_actions::execute_desktop(&params)
+                                                } else {
+                                                    let action_req = ActionRequest {
+                                                        action: action_clone.clone(),
+                                                        path: params.get("path").and_then(|v| v.as_str()).map(String::from),
+                                                        command: params.get("command").and_then(|v| v.as_str()).map(String::from),
+                                                        content: params.get("content").and_then(|v| v.as_str()).map(String::from),
+                                                        process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
+                                                        app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
+                                                        cwd: params.get("cwd").and_then(|v| v.as_str()).map(String::from),
+                                                        confirmed: true,
+                                                    };
+                                                    local_actions::execute(&action_req)
+                                                };
+                                                log::info!("[GatewayWS] <<< Action result: {} success={} output_len={}",
+                                                    action_clone, result.success, result.output.len());
+
+                                                let response = serde_json::json!({
+                                                    "type": "action_result",
+                                                    "requestId": req_id,
+                                                    "success": result.success,
+                                                    "output": result.output,
+                                                });
+                                                if let Ok(json) = serde_json::to_string(&response) {
+                                                    if let Err(e) = tx_clone.send(json) {
+                                                        log::error!("[GatewayWS] Failed to queue response: {}", e);
+                                                    } else {
+                                                        log::info!("[GatewayWS] Response queued for {}", req_id);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        "health.pong" => {
+                                            log::debug!("[GatewayWS] Keepalive pong received");
+                                        }
+                                        _ => {
+                                            log::debug!("[GatewayWS] Received: {}", msg_type);
+                                        }
+                                    }
+                                }
+                                Some(Ok(Message::Ping(data))) => {
+                                    log::debug!("[GatewayWS] Ping frame received");
+                                    let pong = serde_json::json!({"type":"pong"}).to_string();
+                                    let _ = tx.send(pong);
+                                    let _ = data; // auto-pong handled by tungstenite
+                                }
+                                Some(Ok(Message::Close(_))) => {
+                                    log::warn!("[GatewayWS] Server closed connection");
+                                    alive = false;
+                                }
+                                Some(Err(e)) => {
+                                    log::error!("[GatewayWS] Read error: {}", e);
+                                    alive = false;
+                                }
+                                None => {
+                                    log::warn!("[GatewayWS] Stream ended");
+                                    alive = false;
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ = ping_interval.tick() => {
+                            let ping = serde_json::json!({
+                                "type": "health.ping",
+                                "id": "keepalive",
+                            }).to_string();
+                            if tx.send(ping).is_err() {
+                                log::warn!("[GatewayWS] Ping send failed — connection dead");
+                                alive = false;
+                            } else {
+                                log::debug!("[GatewayWS] Keepalive ping sent");
+                            }
+                        }
+                        _ = get_reconnect_notify().notified() => {
+                            log::info!("[GatewayWS] Reconnect signal received, closing current connection");
+                            alive = false;
+                        }
+                    }
+                }
+
+                send_handle.abort();
+                log::warn!("[GatewayWS] Disconnected, reconnecting in 5s...");
+            }
+            Err(e) => {
+                log::error!("[GatewayWS] Connection failed: {}, retry in 5s...", e);
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
 /// Get system info (safe, no confirmation needed)
 #[tauri::command]
 pub fn get_system_info() -> ActionResult {
@@ -353,6 +606,7 @@ pub fn get_system_info() -> ActionResult {
         content: None,
         process_name: None,
         app_name: None,
+        cwd: None,
         confirmed: false,
     })
 }

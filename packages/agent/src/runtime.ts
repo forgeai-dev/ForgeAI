@@ -68,6 +68,14 @@ function compactToolResult(toolName: string, data: unknown, success: boolean, er
       if (obj['screenshot'] && obj['text']) {
         return `screenshot=${obj['screenshot']}\ntext:${(obj['text'] as string).substring(0, MAX_RESULT_CHARS)}`;
       }
+      // Companion-delegated screenshot: image already saved on server
+      // Output path in JSON format so frontend extractScreenshotPaths regex can match "path":"...png"
+      if (obj['path'] && obj['filename']) {
+        return `${JSON.stringify({ path: obj['path'], filename: obj['filename'] })}\nScreenshot captured from Windows Companion. The image will be displayed automatically. Do NOT try to read or verify this file with file_manager.`;
+      }
+      if (obj['output'] && typeof obj['output'] === 'string') {
+        return (obj['output'] as string).substring(0, MAX_RESULT_CHARS);
+      }
     }
 
     // web_browse: truncate content
@@ -300,12 +308,18 @@ export class AgentRuntime {
 
   private defaultSystemPrompt(): string {
     const hasTools = this.toolExecutor !== null;
+    const companionConnected = !!(this.toolExecutor as any)?.companionPlatform;
     const W = process.platform === 'win32';
     const sh = W ? 'PowerShell' : 'Bash';
     const os = W ? 'Windows' : process.platform;
 
     // Detect environment at runtime for smarter agent behavior
     const envInfo = this.detectEnvironment();
+
+    // Compute public URL for use in system prompt (sites served via Gateway)
+    const gatewayPort = process.env.GATEWAY_PORT || '18800';
+    const publicUrl = process.env.PUBLIC_URL
+      || `http://${process.env.GATEWAY_HOST === '0.0.0.0' ? 'localhost' : (process.env.GATEWAY_HOST || 'localhost')}:${gatewayPort}`;
 
     // Load workspace prompts (AGENTS.md, SOUL.md, IDENTITY.md, USER.md)
     const workspacePrompts = loadWorkspacePrompts({
@@ -321,12 +335,31 @@ IMPORTANT: Only describe capabilities you actually have based on the tools liste
     if (!hasTools) return base;
 
     return base + `
-${envInfo}
+${envInfo}${companionConnected ? `
+DUAL ENVIRONMENT: You have access to TWO machines:
+1. SERVER (Linux, default): This machine where you normally run. Use shell_exec/file_manager WITHOUT target param or with target="server".
+2. COMPANION (Windows): The user's Windows PC connected via ForgeAI Companion. Use target="companion" to execute there.
+ROUTING RULES:
+- Default: ALWAYS execute on SERVER unless user explicitly asks for Windows/their PC/local machine/companion.
+- Keywords for Companion: "windows", "meu computador", "minha máquina", "meu pc", "meu desktop", "my computer", "my pc", "local machine"
+- desktop tool (screenshot, GUI control): ALWAYS goes to Companion automatically (server has no GUI).
+- When using target="companion": use PowerShell syntax, Windows paths (C:\\Users\\...), $env:USERPROFILE for home dir.
+- When executing on server (default): use Bash syntax, Linux paths (/home, /etc, etc.).
+Example: shell_exec(command="mkdir -p /tmp/site", target="server") → Linux
+Example: shell_exec(command="New-Item -ItemType Directory -Path \\"$env:USERPROFILE\\Desktop\\site\\" -Force", target="companion") → Windows
+` : ''}
 Tools:
 shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
 file_manager: read/write/list/delete/mkdir/disk_info in workspace
+SERVER NETWORKING (CRITICAL):
+- You run inside Docker. Only port 18800 is exposed externally.
+- NEVER start http-server/serve on localhost — it's inaccessible from outside.
+- For static websites: create files in .forgeai/workspace/<project-name>/ and the site is AUTOMATICALLY served at: ${publicUrl}/sites/<project-name>/
+- Example: file_manager(action=write, path="my-site/index.html", content="<html>...") → accessible at ${publicUrl}/sites/my-site/
+- ALWAYS report the /sites/ URL to the user, NEVER localhost or internal Docker IPs.
+- No need to run any HTTP server — the Gateway serves static files automatically.
  disk_info: get disk usage (total/used/free) — use this for disk space queries, NOT desktop automation
  mkdir: create directories — use this to create folders, NOT desktop automation
 TOOL PRIORITY (CRITICAL):
@@ -427,7 +460,7 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       parts.push(`Env: ${installed.join(', ')}`);
     }
 
-    // Network info
+    // Network info + public URL detection
     try {
       const os = require('node:os') as typeof import('node:os');
       const nets = os.networkInterfaces();
@@ -440,8 +473,15 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
           }
         }
       }
+
+      // Detect public URL from env or build from gateway host/port
+      const publicUrl = process.env.PUBLIC_URL
+        || `http://${process.env.GATEWAY_HOST === '0.0.0.0' ? (localIPs[0] || 'localhost') : (process.env.GATEWAY_HOST || 'localhost')}:${process.env.GATEWAY_PORT || '18800'}`;
+      parts.push(`Public URL: ${publicUrl}`);
+      parts.push(`Sites URL: ${publicUrl}/sites/<project-name>/`);
+
       if (localIPs.length > 0) {
-        parts.push(`Network: local IPs=[${localIPs.join(',')}], NAT=true (no public IP, localhost only)`);
+        parts.push(`Network IPs: ${localIPs.join(', ')}`);
       }
     } catch {
       parts.push('Network: localhost only');

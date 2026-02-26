@@ -297,6 +297,8 @@ Lightweight native desktop client (`packages/companion`) built with **Tauri 2 + 
 - **System Tray** — minimize to tray, single instance enforcement
 - **Smart Safety System** — Rust-based security layer protects OS-critical paths (C:\Windows, System32, boot files) while allowing full file operations everywhere else
 - **Desktop Automation** — the AI agent can create folders, delete files, launch apps, take screenshots, and run shell commands on the machine running the Companion
+- **Dual Environment Routing** — the AI has access to **two machines simultaneously**: the Linux server (Gateway) and your Windows PC (Companion). Use `target="server"` or `target="companion"` on `shell_exec` and `file_manager` to choose where commands execute. The agent auto-detects intent from keywords like "meu computador", "my pc", "windows", etc.
+- **Streaming Heartbeat** — long-running agent tasks (multi-step website creation, complex automation) never timeout. The Gateway sends periodic heartbeats to keep the HTTP connection alive, then delivers the final result. No more "Gateway request failed" errors regardless of task complexity.
 
 #### Quick Start (Companion)
 
@@ -324,6 +326,91 @@ Securely migrate all your configurations from one Gateway to another without man
 4. All Vault data (LLM API keys, TTS config, system settings) is encrypted with AES-256-GCM using the sync code as the key, transmitted, and imported on the destination
 
 Security: codes are single-use, expire in 5 minutes, rate-limited to 3 attempts per 5 minutes. Data is encrypted independently of the Vault encryption — the sync code never travels alongside the encrypted data.
+
+#### Dual Environment Routing
+
+When a Companion is connected, the AI agent can control **two machines simultaneously**:
+
+```
+┌──────────────────────────┐     ┌──────────────────────────┐
+│   SERVER (Linux/Docker)   │     │   COMPANION (Windows PC)  │
+│                           │     │                           │
+│  • Bash commands          │     │  • PowerShell commands    │
+│  • Linux paths (/home/..) │     │  • Windows paths (C:\...) │
+│  • Web hosting            │     │  • Desktop automation     │
+│  • Default execution      │     │  • GUI control            │
+│                           │     │                           │
+│  target="server" (default)│     │  target="companion"       │
+└──────────────────────────┘     └──────────────────────────┘
+```
+
+The agent automatically detects routing intent from keywords:
+- **Server (default)**: "no linux", "no servidor", "on the server"
+- **Companion**: "meu computador", "minha máquina", "meu pc", "my computer", "my desktop", "windows"
+- **Desktop tool** (screenshot, GUI): always routes to Companion (server has no GUI)
+
+### 🌐 Domain / HTTPS (Native)
+
+ForgeAI includes **built-in domain support** with automatic HTTPS via [Caddy](https://caddyserver.com/) reverse proxy. No external setup required — just run a single script.
+
+```bash
+# Interactive setup — validates DNS, checks ports, configures everything
+bash scripts/setup-domain.sh
+```
+
+The script:
+1. Asks for your domain (e.g., `ai.example.com`)
+2. Verifies DNS A record points to your server
+3. Checks that ports 80/443 are available
+4. Configures `.env` with `DOMAIN` and `PUBLIC_URL`
+5. Starts Caddy with automatic Let's Encrypt SSL
+6. Rebuilds the Gateway with the correct public URL
+
+**Or configure manually:**
+
+```bash
+# 1. Set domain in .env
+echo "DOMAIN=ai.example.com" >> .env
+echo "PUBLIC_URL=https://ai.example.com" >> .env
+
+# 2. Start with domain profile
+docker compose --profile domain up -d
+```
+
+| Feature | Details |
+|:--------|:--------|
+| **SSL** | Automatic via Let's Encrypt (zero config) |
+| **Security Headers** | HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+| **WebSocket** | Full support (Companion, real-time updates) |
+| **Timeouts** | Configured for long agent operations |
+| **Revert** | Remove `DOMAIN` from `.env` → `docker compose --profile domain down` → `docker compose up -d` |
+
+### 📦 Static Site Hosting
+
+The Gateway automatically serves static websites created by the agent. No extra ports, no HTTP servers to start.
+
+**How it works:**
+1. Agent creates files in `.forgeai/workspace/<project-name>/`
+2. Files are instantly accessible at `http://<server>:18800/sites/<project-name>/`
+3. With a domain: `https://yourdomain.com/sites/<project-name>/`
+
+```
+User: "create a landing page for my startup"
+
+Agent creates:
+  .forgeai/workspace/startup-landing/
+  ├── index.html
+  ├── style.css
+  └── script.js
+
+Accessible at: https://yourdomain.com/sites/startup-landing/
+```
+
+- Supports HTML, CSS, JS, images, fonts, videos, PDFs
+- Directory index (`index.html`) served automatically
+- No authentication required (sites are public)
+- 5-minute cache for fast loading
+- CORS enabled for cross-origin access
 
 ---
 
@@ -736,6 +823,11 @@ pnpm forge start
 git clone https://github.com/forgeai-dev/ForgeAI.git && cd ForgeAI
 cp .env.example .env   # Edit with your settings
 docker compose up -d    # Gateway + MySQL, ready at http://localhost:18800
+
+# Optional: Enable custom domain with automatic HTTPS
+bash scripts/setup-domain.sh   # Interactive setup
+# Or manually: set DOMAIN=yourdomain.com in .env, then:
+# docker compose --profile domain up -d
 ```
 
 ---
@@ -823,6 +915,10 @@ All core features are implemented and tested:
 - **ForgeAI Companion** — Tauri 2 + React + Rust native Windows client. Pairing system, real-time WebSocket agent progress, tool step display, screenshot viewer with fullscreen + download, voice mode with wake word, Config Sync, system tray, smart Rust safety system, desktop automation
 - **Config Sync** — Secure gateway-to-gateway configuration transfer. AES-256-GCM encryption with one-time 8-char sync codes (5-min TTL), rate-limited, audit-logged. Transfer all Vault data (LLM keys, TTS, system config) between Gateways
 - **Smart File Security** — Agent can delete folders/files anywhere EXCEPT OS-critical paths (C:\Windows, System32, boot, recovery). Shell commands blocked for drive-root wipes and system directory destruction. Rust safety layer in Companion with protected paths, processes, and registry keys
+- **Dual Environment Routing** — `target` parameter on `shell_exec` and `file_manager` tools: `target="server"` (default, Linux/Bash) or `target="companion"` (Windows/PowerShell). CompanionToolExecutor conditionally delegates based on target. Agent auto-detects routing from user intent keywords
+- **Streaming Heartbeat** — Gateway sends periodic heartbeat spaces during long agent processing to keep HTTP connections alive. Companion reads full response, trims heartbeats, parses final JSON. Eliminates timeout errors on complex multi-step tasks regardless of duration
+- **Static Site Hosting** — `/sites/*` route on Gateway serves static files from `.forgeai/workspace/` with directory index support. Agent creates websites directly in workspace, instantly accessible via public URL. No HTTP server needed, no extra ports
+- **Native Domain / HTTPS** — Built-in Caddy reverse proxy with automatic Let's Encrypt SSL. Docker Compose profile (`--profile domain`). Interactive `setup-domain.sh` script validates DNS, checks ports, configures `.env`, and deploys. Security headers (HSTS, X-Frame-Options, etc.) included
 
 ### What's Next
 
@@ -833,6 +929,10 @@ All core features are implemented and tested:
 | ~~Config Sync (gateway-to-gateway transfer)~~ | ✅ Done |
 | ~~Voice wake word detection (Porcupine/Picovoice)~~ | ✅ Done |
 | ~~IoT device node protocol (WebSocket)~~ | ✅ Done |
+| ~~Dual environment routing (server + companion)~~ | ✅ Done |
+| ~~Streaming heartbeat (no timeout on complex tasks)~~ | ✅ Done |
+| ~~Static site hosting via Gateway~~ | ✅ Done |
+| ~~Native domain / HTTPS (Caddy + Let's Encrypt)~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |

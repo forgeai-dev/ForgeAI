@@ -1,6 +1,12 @@
 # ForgeAI — docker compose up and you're running in 30 seconds.
 # No .env file needed! Security secrets are auto-generated on first run.
 # To add LLM keys or channels, use the Dashboard at http://localhost:18800/settings
+#
+# ─── Domain / HTTPS Support ─────────────────────────
+# To enable a custom domain with automatic HTTPS:
+#   1. Set DOMAIN=yourdomain.com in .env
+#   2. Run: docker compose --profile domain up -d
+# Without domain: docker compose up -d (direct access via IP:18800)
 
 services:
   # ─── MySQL Database ────────────────────────────────
@@ -44,8 +50,10 @@ services:
       # Gateway
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 18800
-      # Public URL (set this to your server's public address for correct auth URLs)
+      # Public URL (auto-set by setup-domain.sh, or set manually)
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # Domain (used by Caddy for HTTPS — set via setup-domain.sh)
+      DOMAIN: ${DOMAIN:-}
       # Security — leave empty for auto-generation on first run
       VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}
@@ -77,8 +85,38 @@ services:
       retries: 3
       start_period: 15s
 
+  # ─── Caddy Reverse Proxy (HTTPS) ──────────────────
+  # Activated with: docker compose --profile domain up -d
+  # Provides automatic HTTPS via Let's Encrypt for your domain.
+  caddy:
+    image: caddy:2-alpine
+    container_name: forgeai-caddy
+    restart: unless-stopped
+    profiles: ["domain"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   mysql_data:
     driver: local
   forgeai_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

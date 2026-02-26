@@ -397,6 +397,8 @@ export default function App() {
         gatewayUrl: gatewayUrl.trim(),
         pairingCode: pairingCode.trim(),
       });
+      // Force the Rust WS loop to reconnect with fresh credentials
+      await invoke('force_reconnect_gateway_ws').catch(() => {});
       await loadStatus();
       setView('chat');
       setMessages([
@@ -406,8 +408,7 @@ export default function App() {
           timestamp: Date.now(),
         },
       ]);
-      // Auto-start wake word detection
-      startWakeWord();
+      // Wake word is OFF by default — user can enable in Settings
     } catch (e) {
       setPairError(String(e));
     }
