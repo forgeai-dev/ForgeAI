@@ -92,37 +92,69 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version packages/companion/src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
 
-      - name: Upload Companion to unified project release
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          # Get the previous tag to generate changelog since last release
+          PREV_TAG=$(git tag --sort=-creatordate | grep '^v[0-9]' | head -n 2 | tail -n 1 || echo "")
+          CURRENT_TAG="v${{ steps.version.outputs.version }}"
+
+          echo "Previous tag: $PREV_TAG"
+          echo "Current tag: $CURRENT_TAG"
+
+          # Generate categorized changelog from commit messages
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD~50..HEAD"
+          fi
+
+          FEATS=$(git log $RANGE --pretty=format:"- %s" --grep="^feat" 2>/dev/null || echo "")
+          FIXES=$(git log $RANGE --pretty=format:"- %s" --grep="^fix" 2>/dev/null || echo "")
+          DOCS=$(git log $RANGE --pretty=format:"- %s" --grep="^docs" 2>/dev/null || echo "")
+          OTHER=$(git log $RANGE --pretty=format:"- %s" --grep="^chore\|^refactor\|^ci\|^build" 2>/dev/null || echo "")
+
+          # Build release body
+          BODY="## ForgeAI $CURRENT_TAG"$'\n\n'
+
+          if [ -n "$FEATS" ]; then
+            BODY+="### ✨ New Features"$'\n'"$FEATS"$'\n\n'
+          fi
+          if [ -n "$FIXES" ]; then
+            BODY+="### 🐛 Bug Fixes"$'\n'"$FIXES"$'\n\n'
+          fi
+          if [ -n "$DOCS" ]; then
+            BODY+="### 📝 Documentation"$'\n'"$DOCS"$'\n\n'
+          fi
+          if [ -n "$OTHER" ]; then
+            BODY+="### 🔧 Infrastructure"$'\n'"$OTHER"$'\n\n'
+          fi
+
+          BODY+="---"$'\n\n'
+          BODY+="### Installation"$'\n\n'
+          BODY+='```bash'$'\n'
+          BODY+="# Docker (recommended)"$'\n'
+          BODY+="git clone https://github.com/forgeai-dev/ForgeAI.git && cd ForgeAI"$'\n'
+          BODY+="docker compose up -d"$'\n\n'
+          BODY+="# With custom domain + HTTPS"$'\n'
+          BODY+="bash scripts/setup-domain.sh"$'\n'
+          BODY+='```'$'\n\n'
+          BODY+="### Companion (Windows Desktop Client)"$'\n\n'
+          BODY+="Download the **.exe** or **.msi** installer from the assets below."$'\n'
+          BODY+="Requirements: Windows 10/11 (64-bit), WebView2 Runtime"$'\n'
+
+          # Write to file for the release action
+          echo "$BODY" > release-body.md
+
+      # IMPORTANT: Companion uses the unified project version tag (v1.2.0, v1.3.0, etc.)
+      # NEVER create separate companion-specific tags (companion-v1.x.x).
+      # The Companion is part of the monorepo and follows the same release lifecycle.
+      - name: Upload to unified project release
         uses: softprops/action-gh-release@v2
         with:
-          # IMPORTANT: Companion uses the unified project version tag (v1.2.0, v1.3.0, etc.)
-          # NEVER create separate companion-specific tags (companion-v1.x.x).
-          # The Companion is part of the monorepo and follows the same release lifecycle.
           tag_name: v${{ steps.version.outputs.version }}
           name: ForgeAI v${{ steps.version.outputs.version }}
-          body: |
-            ## ForgeAI v${{ steps.version.outputs.version }}
-
-            ### ForgeAI Companion (Windows Desktop Client)
-
-            Lightweight native Windows assistant (~15MB) built with Tauri 2 + React + Rust.
-
-            **Installation:**
-            - **NSIS Installer** (.exe) — Recommended, includes auto-updater
-            - **MSI Installer** (.msi) — Standard Windows installer
-
-            **Requirements:**
-            - Windows 10/11 (64-bit)
-            - WebView2 Runtime (included in Windows 11, auto-installed on Windows 10)
-
-            **Features:**
-            - Dual environment routing (control server + Windows PC simultaneously)
-            - Streaming heartbeat (no timeout on complex multi-step tasks)
-            - Desktop automation (folders, files, apps, screenshots, shell commands)
-            - Voice mode with wake word detection ("Hey Forge") + STT/TTS
-            - Config Sync (transfer settings between Gateways)
-            - Smart safety system (protects OS-critical paths)
-            - Real-time agent progress via WebSocket
+          body_path: release-body.md
           files: |
             artifacts/msi/*
             artifacts/nsis/*
