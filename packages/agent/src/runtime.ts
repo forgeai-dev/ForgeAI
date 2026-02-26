@@ -308,9 +308,8 @@ export class AgentRuntime {
 
   private defaultSystemPrompt(): string {
     const hasTools = this.toolExecutor !== null;
-    // If tool executor is a CompanionToolExecutor, commands run on Windows, not the Gateway's Linux
-    const companionPlatform = (this.toolExecutor as any)?.companionPlatform as string | undefined;
-    const W = companionPlatform === 'win32' || process.platform === 'win32';
+    const companionConnected = !!(this.toolExecutor as any)?.companionPlatform;
+    const W = process.platform === 'win32';
     const sh = W ? 'PowerShell' : 'Bash';
     const os = W ? 'Windows' : process.platform;
 
@@ -331,14 +330,18 @@ IMPORTANT: Only describe capabilities you actually have based on the tools liste
     if (!hasTools) return base;
 
     return base + `
-${envInfo}${companionPlatform ? `
-COMPANION MODE: shell_exec, file_manager, and desktop commands execute on the USER's WINDOWS machine (not a server).
-- Use ABSOLUTE Windows paths: C:\\Users\\USERNAME\\Desktop\\folder (discover username with $env:USERNAME or whoami)
-- The workspace .forgeai/workspace/ does NOT exist on the user's Windows. Use real Windows paths.
-- PowerShell is the shell. Use mkdir, New-Item, Set-Content, etc.
-- To create a folder on Desktop: shell_exec(command="New-Item -ItemType Directory -Path \\"$env:USERPROFILE\\Desktop\\MyFolder\\" -Force")
-- To write files: shell_exec(command="Set-Content -Path \\"$env:USERPROFILE\\Desktop\\file.txt\\" -Value \\"content\\"")
-- To start a local web server: shell_exec(command="Start-Process npx -ArgumentList 'http-server','-p','8080' -NoNewWindow", cwd="$env:USERPROFILE\\Desktop\\my-site")
+${envInfo}${companionConnected ? `
+DUAL ENVIRONMENT: You have access to TWO machines:
+1. SERVER (Linux, default): This machine where you normally run. Use shell_exec/file_manager WITHOUT target param or with target="server".
+2. COMPANION (Windows): The user's Windows PC connected via ForgeAI Companion. Use target="companion" to execute there.
+ROUTING RULES:
+- Default: ALWAYS execute on SERVER unless user explicitly asks for Windows/their PC/local machine/companion.
+- Keywords for Companion: "windows", "meu computador", "minha máquina", "meu pc", "meu desktop", "my computer", "my pc", "local machine"
+- desktop tool (screenshot, GUI control): ALWAYS goes to Companion automatically (server has no GUI).
+- When using target="companion": use PowerShell syntax, Windows paths (C:\\Users\\...), $env:USERPROFILE for home dir.
+- When executing on server (default): use Bash syntax, Linux paths (/home, /etc, etc.).
+Example: shell_exec(command="mkdir -p /tmp/site", target="server") → Linux
+Example: shell_exec(command="New-Item -ItemType Directory -Path \\"$env:USERPROFILE\\Desktop\\site\\" -Force", target="companion") → Windows
 ` : ''}
 Tools:
 shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)

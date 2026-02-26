@@ -178,6 +178,7 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       { name: 'command', type: 'string', description: 'Shell command to execute (e.g. "npm init -y", "dir", "node index.js", "docker ps")', required: true },
       { name: 'cwd', type: 'string', description: 'Working directory. Relative paths resolve from workspace. Absolute paths (e.g. "C:\\Users" or "/home") are allowed.', required: false },
       { name: 'timeout', type: 'number', description: 'Timeout in ms (default: 60000). Set higher for long tasks like npm install.', required: false },
+      { name: 'target', type: 'string', description: 'Where to execute: "server" (default, Linux/Gateway) or "companion" (user\'s Windows machine via ForgeAI Companion). Only use "companion" when the user explicitly asks to do something on their Windows/local machine.', required: false },
     ],
   };
 

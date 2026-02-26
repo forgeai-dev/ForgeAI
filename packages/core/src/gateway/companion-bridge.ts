@@ -229,8 +229,16 @@ export class CompanionToolExecutor implements ToolExecutor {
   }
 
   async execute(name: string, params: Record<string, unknown>, userId?: string) {
-    // If this tool should be delegated AND the companion is connected, delegate
-    if (CompanionBridge.isDelegatedTool(name) && this.bridge.isConnected(this.companionId)) {
+    // Routing logic: delegate to Companion only when explicitly requested or for desktop tool
+    // - desktop: always delegate (server has no GUI)
+    // - shell_exec / file_manager: delegate only when target="companion"
+    const target = String(params['target'] || 'server').toLowerCase();
+    const shouldDelegate =
+      (name === 'desktop' || target === 'companion') &&
+      CompanionBridge.isDelegatedTool(name) &&
+      this.bridge.isConnected(this.companionId);
+
+    if (shouldDelegate) {
       const mapped = CompanionBridge.mapToolToAction(name, params);
 
       logger.info(`Delegating ${name} to Companion`, { companionId: this.companionId, action: mapped.action });
