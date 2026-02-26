@@ -23,6 +23,7 @@ pub struct CompanionStatus {
     pub connected: bool,
     pub gateway_url: Option<String>,
     pub companion_id: Option<String>,
+    pub auth_token: Option<String>,
     pub safety_active: bool,
     pub version: String,
 }
@@ -78,6 +79,7 @@ pub fn get_status() -> CompanionStatus {
         connected: creds.is_some(),
         gateway_url: creds.as_ref().map(|c| c.gateway_url.clone()),
         companion_id: creds.as_ref().map(|c| c.companion_id.clone()),
+        auth_token: creds.as_ref().and_then(|c| c.auth_token.clone()),
         safety_active: true,
         version: env!("CARGO_PKG_VERSION").to_string(),
     }

@@ -2169,6 +2169,14 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       }
     }
 
+    // Check query param (for WebSocket connections that can't send headers)
+    if (!token) {
+      const query = (request.query || {}) as Record<string, string>;
+      if (query.token) {
+        token = query.token;
+      }
+    }
+
     // Validate token format: must be a valid JWT (3 base64url segments)
     if (token && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
       return null; // Reject malformed tokens before they reach verifyAccessToken

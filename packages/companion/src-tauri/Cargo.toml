@@ -1,6 +1,6 @@
 [package]
 name = "forgeai-companion"
-version = "1.1.0"
+version = "1.2.0"
 description = "ForgeAI Desktop Companion"
 authors = ["ForgeAI"]
 edition = "2021"
