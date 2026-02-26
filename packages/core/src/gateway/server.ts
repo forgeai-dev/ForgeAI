@@ -256,6 +256,7 @@ export class Gateway {
       '/api/googlechat/webhook',
       '/api/companion/pair',
       '/api/config/sync-receive',  // Has own auth: sync code + AES-256-GCM encryption
+      '/ws',                       // WebSocket — auth via token query param, not cookie
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
     const AUTH_EXEMPT_PREFIX = [
