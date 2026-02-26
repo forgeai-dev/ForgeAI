@@ -2261,9 +2261,10 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       // Track Companion connections by companionId query param
       const query = (request.query || {}) as Record<string, string>;
       const companionId = query.companionId || '';
+      logger.info('WS connection opened', { url: request.url, companionId: companionId || '(none)', queryKeys: Object.keys(query).join(',') || '(empty)' });
       if (companionId) {
         companionBridge.registerCompanion(companionId, socket);
-        logger.info('Companion WS connected', { companionId });
+        logger.info('Companion WS registered in bridge', { companionId });
       }
 
       socket.on('message', (raw: Buffer) => {
