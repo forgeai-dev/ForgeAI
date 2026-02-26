@@ -47,6 +47,8 @@ pub struct CompanionCredentials {
     pub gateway_url: String,
     pub companion_id: String,
     pub role: String,
+    #[serde(default)]
+    pub auth_token: Option<String>,
 }
 
 /// ForgeAI Gateway connection manager
@@ -184,6 +186,9 @@ impl GatewayConnection {
                 .as_str()
                 .unwrap_or("user")
                 .to_string(),
+            auth_token: data["authToken"]
+                .as_str()
+                .map(|s| s.to_string()),
         };
 
         Self::save_credentials(&creds)?;

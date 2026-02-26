@@ -160,7 +160,7 @@ export class Gateway {
     this.loadSMTPFromVault();
 
     // Register chat + agent routes (pass vault for persistent key storage)
-    await registerChatRoutes(this.app, this.vault);
+    await registerChatRoutes(this.app, this.vault, this.auth);
 
     // Wire security alerts → Telegram + WebSocket
     this.registerSecurityAlerts();

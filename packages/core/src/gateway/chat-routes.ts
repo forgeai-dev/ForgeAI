@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { createLogger, generateId } from '@forgeai/shared';
+import { createLogger, generateId, UserRole } from '@forgeai/shared';
 import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
 import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool } from '@forgeai/tools';
-import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault } from '@forgeai/security';
+import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager } from '@forgeai/agent';
@@ -95,7 +95,7 @@ export function getTelegramChannel(): TelegramChannel | null {
   return telegramChannel;
 }
 
-export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): Promise<void> {
+export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, auth?: JWTAuth): Promise<void> {
   // Initialize LLM Router (starts empty — no env var auto-registration)
   const router = createLLMRouter();
 
@@ -4224,12 +4224,25 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         return { success: false, message: result.message };
       }
 
-      logger.info('Companion paired via REST', { companionId, deviceName, role: result.role });
+      // Generate a long-lived JWT for the Companion (30 days)
+      let authToken: string | undefined;
+      if (auth) {
+        const COMPANION_TOKEN_EXPIRY = 30 * 24 * 60 * 60; // 30 days in seconds
+        const tokenPair = auth.generateTokenPair({
+          userId: companionId,
+          username: `companion-${companionId}`,
+          role: (result.role as 'admin' | 'user' | 'viewer') ?? UserRole.USER,
+        }, COMPANION_TOKEN_EXPIRY);
+        authToken = tokenPair.accessToken;
+      }
+
+      logger.info('Companion paired via REST', { companionId, deviceName, role: result.role, hasToken: !!authToken });
 
       return {
         success: true,
         companionId,
         role: result.role,
+        authToken,
         message: result.message,
       };
     }

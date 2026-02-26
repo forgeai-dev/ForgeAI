@@ -8,6 +8,15 @@ use crate::local_actions::{self, ActionRequest, ActionResult};
 use crate::safety;
 use serde::{Deserialize, Serialize};
 
+/// Build a reqwest::RequestBuilder with auth cookie if available
+fn with_auth(builder: reqwest::RequestBuilder, creds: &crate::connection::CompanionCredentials) -> reqwest::RequestBuilder {
+    if let Some(ref token) = creds.auth_token {
+        builder.header("Cookie", format!("forgeai_session={}", token))
+    } else {
+        builder
+    }
+}
+
 /// Status response for the frontend
 #[derive(Debug, Clone, Serialize)]
 pub struct CompanionStatus {
@@ -161,7 +170,7 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
     let url = format!("{}/api/chat", creds.gateway_url);
 
     let client = reqwest::Client::new();
-    let resp = client
+    let req = client
         .post(&url)
         .json(&serde_json::json!({
             "message": message,
@@ -169,7 +178,8 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
             "userId": creds.companion_id,
             "channelType": "companion",
         }))
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(120));
+    let resp = with_auth(req, &creds)
         .send()
         .await
         .map_err(|e| format!("Gateway request failed: {}", e))?;
@@ -243,7 +253,11 @@ pub async fn chat_voice(
     let mut last_err = String::new();
     let mut resp_opt = None;
     for attempt in 0..2 {
-        match client.post(&url).json(&payload).send().await {
+        let mut req = client.post(&url).json(&payload);
+        if let Some(ref token) = creds.auth_token {
+            req = req.header("Cookie", format!("forgeai_session={}", token));
+        }
+        match req.send().await {
             Ok(r) => { resp_opt = Some(r); break; }
             Err(e) => {
                 last_err = format!("{}", e);
@@ -448,9 +462,16 @@ pub async fn read_screenshot(path: String, gateway_url: Option<String>) -> Resul
             log::info!("Screenshot not local, fetching from Gateway: {}", url);
 
             let client = reqwest::Client::new();
-            let resp = client
+            let mut req = client
                 .get(&url)
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(std::time::Duration::from_secs(15));
+            // Try to add auth if credentials are available
+            if let Some(creds) = crate::connection::GatewayConnection::load_credentials() {
+                if let Some(ref token) = creds.auth_token {
+                    req = req.header("Cookie", format!("forgeai_session={}", token));
+                }
+            }
+            let resp = req
                 .send()
                 .await
                 .map_err(|e| format!("Gateway fetch failed: {}", e))?;
@@ -476,9 +497,10 @@ pub async fn list_sessions() -> Result<serde_json::Value, String> {
 
     let url = format!("{}/api/chat/sessions", creds.gateway_url);
     let client = reqwest::Client::new();
-    let resp = client
+    let req = client
         .get(&url)
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+    let resp = with_auth(req, &creds)
         .send()
         .await
         .map_err(|e| format!("Gateway request failed: {}", e))?;
@@ -514,9 +536,10 @@ pub async fn get_session_history(session_id: String) -> Result<serde_json::Value
 
     let url = format!("{}/api/chat/history/{}", creds.gateway_url, session_id);
     let client = reqwest::Client::new();
-    let resp = client
+    let req = client
         .get(&url)
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+    let resp = with_auth(req, &creds)
         .send()
         .await
         .map_err(|e| format!("Gateway request failed: {}", e))?;
@@ -536,9 +559,10 @@ pub async fn delete_session(session_id: String) -> Result<serde_json::Value, Str
 
     let url = format!("{}/api/chat/sessions/{}", creds.gateway_url, session_id);
     let client = reqwest::Client::new();
-    let resp = client
+    let req = client
         .delete(&url)
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+    let resp = with_auth(req, &creds)
         .send()
         .await
         .map_err(|e| format!("Gateway request failed: {}", e))?;

@@ -35,13 +35,14 @@ export class JWTAuth {
     logger.info('JWT auth initialized');
   }
 
-  generateTokenPair(payload: JWTPayload): TokenPair {
+  generateTokenPair(payload: JWTPayload, expiresInOverride?: number): TokenPair {
     const tokenId = generateId('tok');
+    const expiresIn = expiresInOverride ?? this.expiresIn;
 
     const accessToken = jwt.sign(
       { ...payload, jti: tokenId, type: 'access' },
       this.secret,
-      { expiresIn: this.expiresIn }
+      { expiresIn }
     );
 
     const refreshToken = jwt.sign(
@@ -58,7 +59,7 @@ export class JWTAuth {
     return {
       accessToken,
       refreshToken,
-      expiresIn: `${this.expiresIn}s`,
+      expiresIn: `${expiresIn}s`,
       expiresAt,
     };
   }
