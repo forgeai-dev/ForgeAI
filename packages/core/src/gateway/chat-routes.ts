@@ -4231,7 +4231,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         const tokenPair = auth.generateTokenPair({
           userId: companionId,
           username: `companion-${companionId}`,
-          role: (result.role as 'admin' | 'user' | 'viewer') ?? UserRole.USER,
+          role: (result.role as UserRole) ?? UserRole.USER,
         }, COMPANION_TOKEN_EXPIRY);
         authToken = tokenPair.accessToken;
       }
