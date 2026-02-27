@@ -3,6 +3,21 @@ import { mkdirSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import {
+  generateStealthProfile,
+  getStealthLaunchArgs,
+  applyStealthEvasions,
+  getGoogleSearchReferer,
+  type StealthProfile,
+} from '../utils/browser-stealth.js';
+import { getGlobalProxyRotator, isProxyError, type ProxyConfig } from '../utils/proxy-rotator.js';
+import {
+  createFingerprint,
+  findBestMatch,
+  EXTRACT_CANDIDATES_SCRIPT,
+  type ElementFingerprint,
+  type CandidateElement,
+} from '../utils/element-fingerprint.js';
 
 // Local/private addresses are ALLOWED since the agent runs locally and needs to test local sites.
 // Only block dangerous non-HTTP protocols in isBlockedUrl().
@@ -13,11 +28,12 @@ const PROFILES_DIR = resolve(process.cwd(), '.forgeai', 'browser-profiles');
 const SNAPSHOTS_DIR = resolve(process.cwd(), '.forgeai', 'snapshots');
 const MAX_NAV_TIMEOUT = 30_000;
 
-const STEALTH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
 export class PuppeteerBrowserTool extends BaseTool {
   private browser: Browser | null = null;
   private currentProfile: string = 'default';
+  private stealthProfile: StealthProfile = generateStealthProfile();
+  // Adaptive element tracking: in-memory fingerprint cache (url::selector → fingerprint)
+  private fingerprintCache: Map<string, ElementFingerprint> = new Map();
 
   readonly definition: ToolDefinition = {
     name: 'browser',
@@ -60,18 +76,19 @@ export class PuppeteerBrowserTool extends BaseTool {
       }
       this.currentProfile = targetProfile;
 
-      const launchArgs = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--headless=new',
-        '--disable-blink-features=AutomationControlled',
-        `--user-agent=${STEALTH_UA}`,
-        '--lang=pt-BR,pt,en-US,en',
-      ];
+      // Generate a fresh stealth profile on each browser launch for fingerprint diversity
+      this.stealthProfile = generateStealthProfile();
+      const launchArgs = getStealthLaunchArgs(this.stealthProfile);
+
+      // Proxy support: inject proxy arg if a global rotator is configured
+      const proxyRotator = getGlobalProxyRotator();
+      let activeProxy: ProxyConfig | null = null;
+      if (proxyRotator) {
+        activeProxy = proxyRotator.next();
+        if (activeProxy) {
+          launchArgs.push(`--proxy-server=${activeProxy.url}`);
+        }
+      }
 
       // Try Puppeteer bundled Chrome first
       try {
@@ -106,23 +123,18 @@ export class PuppeteerBrowserTool extends BaseTool {
     const pages = await this.browser.pages();
     const page = pages.length > 0 ? pages[0] : await this.browser.newPage();
 
-    // Stealth: override navigator.webdriver and other bot signals
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      // @ts-ignore
-      window.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
-      Object.defineProperty(navigator, 'permissions', {
-        get: () => ({ query: (_p: any) => Promise.resolve({ state: 'granted', onchange: null }) }),
-      });
-    });
+    // Apply comprehensive stealth evasions
+    await applyStealthEvasions(page, this.stealthProfile);
 
-    await page.setUserAgent(STEALTH_UA);
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-    });
-    await page.setViewport({ width: 1280, height: 720 });
+    // Proxy auth: if proxy requires credentials, handle via page.authenticate
+    const proxyRotator = getGlobalProxyRotator();
+    if (proxyRotator) {
+      const activeProxy = proxyRotator.next();
+      if (activeProxy?.username && activeProxy?.password) {
+        await page.authenticate({ username: activeProxy.username, password: activeProxy.password });
+      }
+    }
+
     return { browser: this.browser, page };
   }
 
@@ -251,9 +263,16 @@ export class PuppeteerBrowserTool extends BaseTool {
 
     const waitFor = params['waitFor'] as string | undefined;
 
-    // Retry navigation up to 2 times (HTTP2 errors, timeouts, etc.)
+    // Set referer as if coming from Google search (anti-bot evasion)
+    await page.setExtraHTTPHeaders({
+      'Referer': getGoogleSearchReferer(url),
+      'Accept-Language': this.stealthProfile.languages.join(',') + ';q=0.9',
+    });
+
+    // Retry navigation up to 2 times (HTTP2 errors, timeouts, proxy errors, etc.)
     const MAX_RETRIES = 2;
     let lastError: Error | null = null;
+    const proxyRotator = getGlobalProxyRotator();
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         if (attempt > 0) {
@@ -264,10 +283,21 @@ export class PuppeteerBrowserTool extends BaseTool {
           waitUntil: attempt > 0 ? 'domcontentloaded' : 'networkidle2',
           timeout: MAX_NAV_TIMEOUT,
         });
+        // Report proxy success if applicable
+        if (proxyRotator) {
+          const proxy = proxyRotator.next();
+          if (proxy) proxyRotator.reportSuccess(proxy);
+        }
         lastError = null;
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        // Report proxy failure if it's a proxy-related error
+        if (proxyRotator && isProxyError(lastError)) {
+          const proxy = proxyRotator.next();
+          if (proxy) proxyRotator.reportFailure(proxy);
+          this.logger.debug('Proxy error detected, reported failure', { url, attempt });
+        }
         // ERR_ABORTED = URL triggered a download, not a page navigation
         if (lastError.message.includes('ERR_ABORTED')) {
           return { title: '', url, status: 'download_triggered', note: 'This URL triggers a file download. Use web_browse or shell_exec with curl to fetch the file directly.' };
@@ -318,14 +348,46 @@ export class PuppeteerBrowserTool extends BaseTool {
     const selector = params['selector'] as string | undefined;
 
     if (selector) {
-      const elements = await page.$$eval(selector, (els: any[]) =>
+      // Try the original selector first
+      let resolvedSelector = selector;
+      let adaptiveUsed = false;
+
+      try {
+        const found = await page.$(selector);
+        if (found) {
+          // Selector works — save fingerprint for future adaptive matching
+          await this.saveFingerprint(page, selector);
+        } else {
+          // Selector failed — try adaptive matching
+          const match = await this.adaptiveMatch(page, selector);
+          if (match) {
+            resolvedSelector = match.selector;
+            adaptiveUsed = true;
+            this.logger.debug('Adaptive match found for content', { original: selector, resolved: resolvedSelector, score: match.score });
+          }
+        }
+      } catch {
+        // Selector syntax error or other issue — try adaptive
+        const match = await this.adaptiveMatch(page, selector);
+        if (match) {
+          resolvedSelector = match.selector;
+          adaptiveUsed = true;
+        }
+      }
+
+      const elements = await page.$$eval(resolvedSelector, (els: any[]) =>
         els.map((el: any) => ({
           tag: el.tagName.toLowerCase(),
           text: (el.textContent || '').trim().slice(0, 500),
           href: el.href || undefined,
         }))
       );
-      return { selector, count: elements.length, elements: elements.slice(0, 50) };
+      const result: Record<string, unknown> = { selector: resolvedSelector, count: elements.length, elements: elements.slice(0, 50) };
+      if (adaptiveUsed) {
+        result['adaptiveMatch'] = true;
+        result['originalSelector'] = selector;
+      }
+      return result;
     }
 
     const title = await page.title();
@@ -352,13 +414,38 @@ export class PuppeteerBrowserTool extends BaseTool {
     const selector = String(params['selector'] || '');
     if (!selector) throw new Error('selector is required for click action');
 
-    await page.waitForSelector(selector, { timeout: 5_000 });
-    await page.click(selector);
+    let resolvedSelector = selector;
+    let adaptiveUsed = false;
+
+    try {
+      await page.waitForSelector(selector, { timeout: 3_000 });
+      // Selector works — save fingerprint
+      await this.saveFingerprint(page, selector);
+    } catch {
+      // Selector not found — try adaptive matching
+      const match = await this.adaptiveMatch(page, selector);
+      if (match) {
+        resolvedSelector = match.selector;
+        adaptiveUsed = true;
+        this.logger.debug('Adaptive match found for click', { original: selector, resolved: resolvedSelector, score: match.score });
+        await page.waitForSelector(resolvedSelector, { timeout: 5_000 });
+      } else {
+        // No adaptive match — re-throw with helpful message
+        throw new Error(`Selector "${selector}" not found and no adaptive match available. The page structure may have changed significantly.`);
+      }
+    }
+
+    await page.click(resolvedSelector);
 
     // Wait briefly for any navigation or DOM changes
     await new Promise(r => setTimeout(r, 500));
 
-    return { clicked: selector, url: page.url(), title: await page.title() };
+    const result: Record<string, unknown> = { clicked: resolvedSelector, url: page.url(), title: await page.title() };
+    if (adaptiveUsed) {
+      result['adaptiveMatch'] = true;
+      result['originalSelector'] = selector;
+    }
+    return result;
   }
 
   private async typeAction(page: Page, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -608,7 +695,7 @@ export class PuppeteerBrowserTool extends BaseTool {
     if (selector) {
       // Direct input[type=file] — set files directly via CDP
       await page.waitForSelector(selector, { timeout: 5_000 });
-      const inputEl = await page.$(selector);
+      const inputEl = await page.$(selector) as import('puppeteer').ElementHandle<HTMLInputElement> | null;
       if (!inputEl) throw new Error(`Element not found: ${selector}`);
       await inputEl.uploadFile(...files);
       return { uploaded: files.length, files, selector, method: 'input' };
@@ -739,6 +826,66 @@ export class PuppeteerBrowserTool extends BaseTool {
       sessionStorageKeys: Object.keys(pageState.sessionStorage).length,
       formsCount: pageState.forms.length,
     };
+  }
+
+  // ─── Adaptive Element Tracking ─────────────────────────────────────
+
+  private async saveFingerprint(page: Page, selector: string): Promise<void> {
+    try {
+      const url = page.url();
+      const extractFn = new Function('return ' + EXTRACT_CANDIDATES_SCRIPT)();
+      const result = await page.evaluate(extractFn, selector) as { found: boolean; element: CandidateElement | null };
+
+      if (result.found && result.element) {
+        const fingerprint = createFingerprint(url, selector, result.element);
+        this.fingerprintCache.set(`${url}::${selector}`, fingerprint);
+      }
+    } catch {
+      // Non-critical — don't break the main action
+    }
+  }
+
+  private async adaptiveMatch(page: Page, originalSelector: string): Promise<{ selector: string; score: number } | null> {
+    try {
+      const url = page.url();
+      const cacheKey = `${url}::${originalSelector}`;
+      const fingerprint = this.fingerprintCache.get(cacheKey);
+
+      if (!fingerprint) return null;
+
+      // Extract all candidate elements from the current page
+      const extractFn = new Function('return ' + EXTRACT_CANDIDATES_SCRIPT)();
+      const result = await page.evaluate(extractFn, null) as { found: boolean; candidates?: CandidateElement[] };
+
+      if (!result.candidates || result.candidates.length === 0) return null;
+
+      // Find the best match using similarity engine
+      const match = findBestMatch(fingerprint, result.candidates, 'medium');
+
+      if (match) {
+        // Update the fingerprint cache with the new selector
+        const updatedFingerprint = createFingerprint(url, match.candidate.generatedSelector, match.candidate);
+        updatedFingerprint.id = fingerprint.id; // Keep same ID for tracking
+        updatedFingerprint.matchCount = fingerprint.matchCount + 1;
+        this.fingerprintCache.set(cacheKey, updatedFingerprint);
+
+        this.logger.debug('Adaptive element tracking', {
+          original: originalSelector,
+          resolved: match.candidate.generatedSelector,
+          score: match.score.toFixed(3),
+          confidence: match.confidence,
+        });
+
+        return {
+          selector: match.candidate.generatedSelector,
+          score: match.score,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   // ─── Close ─────────────────────────────────────

@@ -1,6 +1,15 @@
 import * as cheerio from 'cheerio';
+import TurndownService from 'turndown';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import { getGlobalProxyRotator, isProxyError } from '../utils/proxy-rotator.js';
+import {
+  createFingerprint,
+  findBestMatch,
+  extractCandidateFromCheerio,
+  extractAllCandidatesFromCheerio,
+  type ElementFingerprint,
+} from '../utils/element-fingerprint.js';
 
 // Local/private addresses are ALLOWED since the agent runs locally and needs to test local sites.
 const BLOCKED_DOMAINS: string[] = [];
@@ -17,6 +26,9 @@ const BROWSER_USER_AGENTS = [
 const randomUA = () => BROWSER_USER_AGENTS[Math.floor(Math.random() * BROWSER_USER_AGENTS.length)];
 
 export class WebBrowserTool extends BaseTool {
+  // Adaptive element tracking: in-memory fingerprint cache (url::selector → fingerprint)
+  private fingerprintCache: Map<string, ElementFingerprint> = new Map();
+
   readonly definition: ToolDefinition = {
     name: 'web_browse',
     description: 'Fetch web pages or APIs and extract content. Supports GET/POST/PUT/DELETE, custom headers, and multiple extraction modes: text, links, images, html, tables, metadata, json.',
@@ -27,7 +39,7 @@ export class WebBrowserTool extends BaseTool {
       { name: 'headers', type: 'object', description: 'Custom HTTP headers as key-value pairs', required: false },
       { name: 'body', type: 'string', description: 'Request body for POST/PUT (string or JSON string)', required: false },
       { name: 'selector', type: 'string', description: 'CSS selector to extract specific content', required: false },
-      { name: 'extract', type: 'string', description: 'What to extract: "text" (default), "links", "images", "html", "tables", "metadata", "json"', required: false, default: 'text' },
+      { name: 'extract', type: 'string', description: 'What to extract: "text" (default), "markdown", "links", "images", "html", "tables", "metadata", "json". Markdown mode converts page content to clean Markdown, ideal for AI consumption with minimal tokens.', required: false, default: 'text' },
       { name: 'maxLength', type: 'number', description: 'Max content length in characters', required: false, default: 10000 },
     ],
   };
@@ -81,9 +93,16 @@ export class WebBrowserTool extends BaseTool {
         fetchHeaders['Content-Type'] = 'application/json';
       }
 
+      // Set referer as if coming from Google search (anti-bot evasion)
+      try {
+        const domain = new URL(url).hostname.replace(/^www\./, '');
+        fetchHeaders['Referer'] = `https://www.google.com/search?q=${encodeURIComponent(domain)}`;
+      } catch { /* ignore */ }
+
       // Retry logic: up to 2 retries with backoff
       const MAX_RETRIES = 2;
       let lastError: Error | null = null;
+      const proxyRotator = getGlobalProxyRotator();
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         const controller = new AbortController();
@@ -97,13 +116,15 @@ export class WebBrowserTool extends BaseTool {
             this.logger.debug('Retrying web browse', { url, attempt });
           }
 
-          const response = await fetch(url, {
+          const fetchOptions: RequestInit = {
             method,
             signal: controller.signal,
             headers: fetchHeaders,
             body: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined,
             redirect: 'follow',
-          });
+          };
+
+          const response = await fetch(url, fetchOptions);
 
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -135,7 +156,45 @@ export class WebBrowserTool extends BaseTool {
         // Remove scripts and styles
         $('script, style, noscript').remove();
 
-        const root = selector ? $(selector) : $('body');
+        let resolvedSelector = selector;
+        let adaptiveUsed = false;
+
+        // Adaptive element tracking: if selector yields nothing, try fingerprint matching
+        if (selector) {
+          const selectorResult = $(selector);
+          if (selectorResult.length === 0) {
+            // Selector didn't match — try adaptive
+            const cacheKey = `${url}::${selector}`;
+            const fingerprint = this.fingerprintCache.get(cacheKey);
+            if (fingerprint) {
+              const candidates = extractAllCandidatesFromCheerio($, fingerprint.tag);
+              const match = findBestMatch(fingerprint, candidates, 'medium');
+              if (match) {
+                resolvedSelector = match.candidate.generatedSelector;
+                adaptiveUsed = true;
+                this.logger.debug('Adaptive match in web_browse', {
+                  original: selector,
+                  resolved: resolvedSelector,
+                  score: match.score.toFixed(3),
+                  confidence: match.confidence,
+                });
+              }
+            }
+          } else {
+            // Selector works — save fingerprint for future adaptive matching
+            try {
+              const firstEl = selectorResult.first();
+              if (firstEl.length > 0) {
+                const candidate = extractCandidateFromCheerio($, firstEl[0], selector);
+                const fp = createFingerprint(url, selector, candidate);
+                this.fingerprintCache.set(`${url}::${selector}`, fp);
+              }
+            } catch { /* non-critical */ }
+          }
+        }
+
+        const root = resolvedSelector ? $(resolvedSelector) : $('body');
+        const adaptiveInfo = adaptiveUsed ? { adaptiveMatch: true, originalSelector: selector, resolvedSelector } : {};
 
         switch (extract) {
           case 'links': {
@@ -145,7 +204,7 @@ export class WebBrowserTool extends BaseTool {
               const text = $(el).text().trim();
               if (href && text) links.push({ text: text.slice(0, 200), href });
             });
-            return { type: 'links', count: links.length, links: links.slice(0, 100) };
+            return { type: 'links', count: links.length, links: links.slice(0, 100), ...adaptiveInfo };
           }
 
           case 'images': {
@@ -155,12 +214,12 @@ export class WebBrowserTool extends BaseTool {
               const alt = $(el).attr('alt') || '';
               if (src) images.push({ alt, src });
             });
-            return { type: 'images', count: images.length, images: images.slice(0, 50) };
+            return { type: 'images', count: images.length, images: images.slice(0, 50), ...adaptiveInfo };
           }
 
           case 'html': {
             const content = root.html() || '';
-            return { type: 'html', content: content.slice(0, maxLength) };
+            return { type: 'html', content: content.slice(0, maxLength), ...adaptiveInfo };
           }
 
           case 'tables': {
@@ -184,7 +243,7 @@ export class WebBrowserTool extends BaseTool {
               });
               tables.push({ headers, rows, rowCount: rows.length });
             });
-            return { type: 'tables', count: tables.length, tables };
+            return { type: 'tables', count: tables.length, tables, ...adaptiveInfo };
           }
 
           case 'metadata': {
@@ -207,6 +266,31 @@ export class WebBrowserTool extends BaseTool {
             };
           }
 
+          case 'markdown': {
+            const turndown = new TurndownService({
+              headingStyle: 'atx',
+              codeBlockStyle: 'fenced',
+              bulletListMarker: '-',
+            });
+            // Remove noisy elements to reduce token usage
+            turndown.addRule('removeNoise', {
+              filter: (node: any) => ['IMG', 'IFRAME', 'SVG', 'VIDEO', 'AUDIO'].includes(node.nodeName),
+              replacement: () => '',
+            });
+            const htmlContent = root.html() || '';
+            const markdown = turndown.turndown(htmlContent)
+              .replace(/\n{3,}/g, '\n\n')  // Collapse excessive newlines
+              .trim();
+            return {
+              type: 'markdown',
+              title: $('title').text().trim(),
+              content: markdown.slice(0, maxLength),
+              length: markdown.length,
+              truncated: markdown.length > maxLength,
+              ...adaptiveInfo,
+            };
+          }
+
           case 'text':
           default: {
             const text = root.text().replace(/\s+/g, ' ').trim();
@@ -216,11 +300,17 @@ export class WebBrowserTool extends BaseTool {
               content: text.slice(0, maxLength),
               length: text.length,
               truncated: text.length > maxLength,
+              ...adaptiveInfo,
             };
           }
         }
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
+          // Report proxy failure if applicable
+          if (proxyRotator && isProxyError(lastError)) {
+            const proxy = proxyRotator.next();
+            if (proxy) proxyRotator.reportFailure(proxy);
+          }
           clearTimeout(timeout);
           if (attempt < MAX_RETRIES) continue;
           throw lastError;

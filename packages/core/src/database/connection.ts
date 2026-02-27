@@ -102,6 +102,14 @@ export async function runMigrations(): Promise<void> {
       logger.info('Migration 004_activity_log applied');
     }
 
+    // Migration 5: Element Fingerprints (Adaptive Tracking)
+    if (currentVersion < 5) {
+      logger.info('Applying migration 005_element_fingerprints...');
+      await applyMigration005(database);
+      await database('forgeai_migrations').insert({ version: 5, name: '005_element_fingerprints' });
+      logger.info('Migration 005_element_fingerprints applied');
+    }
+
     logger.info('All migrations applied successfully');
   } catch (error) {
     logger.error('Migration failed', error);
@@ -283,6 +291,26 @@ async function applyMigration004(db: Knex): Promise<void> {
       table.index('risk_level');
     });
     logger.info('Created activity_log table');
+  }
+}
+
+async function applyMigration005(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('element_fingerprints');
+  if (!hasTable) {
+    await db.schema.createTable('element_fingerprints', (table) => {
+      table.string('id', 16).primary();
+      table.string('url', 2048).notNullable();
+      table.string('selector', 1024).notNullable();
+      table.json('fingerprint_json').notNullable();
+      table.timestamp('last_matched').notNullable().defaultTo(db.fn.now());
+      table.integer('match_count').notNullable().defaultTo(1);
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('url');
+      table.index('last_matched');
+      table.index('match_count');
+    });
+    logger.info('Created element_fingerprints table');
   }
 }
 

@@ -17,3 +17,5 @@ export { OTelManager, createOTelManager, getOTelManager } from './telemetry/otel
 export type { OTelConfig, SpanData, MetricPoint } from './telemetry/otel-manager.js';
 export { ArtifactManager, createArtifactManager } from './artifact/artifact-manager.js';
 export { SessionRecorder, createSessionRecorder } from './recording/session-recorder.js';
+export { FingerprintStore } from './database/fingerprint-store.js';
+export type { StoredFingerprint } from './database/fingerprint-store.js';

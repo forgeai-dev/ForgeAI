@@ -578,12 +578,14 @@ TOOL PRIORITY (CRITICAL):
 - For file operations: use file_manager or shell_exec. NEVER navigate GUI file managers.
 - desktop tool is ONLY for controlling GUI apps that have NO CLI/API (e.g. WhatsApp, Spotify, games).
 - ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
-browser: Chrome headless — navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close
+browser: Chrome headless with stealth anti-detection (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). Supports proxy rotation when configured.
+ navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close
  scroll: direction=down|up|left|right|top|bottom, amount=pixels
  extract_table: selector="table" → structured {headers, rows}
  cookies/set_cookie/clear_cookies: manage page cookies
  new_tab/switch_tab/close_tab: multi-tab browsing
-web_browse: lightweight HTTP fetch (no Chrome). Supports method=GET|POST|PUT|DELETE, headers, body. Extract: text|links|images|html|tables|metadata|json
+web_browse: lightweight HTTP fetch (no Chrome). Supports method=GET|POST|PUT|DELETE, headers, body. Extract: text|markdown|links|images|html|tables|metadata|json
+ PREFER extract="markdown" for reading web pages — converts HTML to clean Markdown, preserves structure, reduces token usage vs raw text
 web_search: search Google/DuckDuckGo → structured results {title, url, snippet}. Use for research/finding info
 desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
  actions: list_windows|focus_window|open_app|send_keys|type_text|click|screenshot|key_combo|wait|get_clipboard|read_screen|read_window_text
