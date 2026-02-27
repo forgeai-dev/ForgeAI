@@ -2433,6 +2433,71 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return reply.send(createReadStream(filePath));
   });
 
+  // ─── REST API: Dynamic App Proxy ──────────────────
+  // Proxies /apps/<port>/* to localhost:<port> inside Docker.
+  // Allows agent-started servers (Node.js, Python, etc.) to be accessible
+  // via the main Gateway port (18800) — works with domain/HTTPS too.
+  // Example: http://server:18800/apps/3001/ → proxies to localhost:3001/
+
+  app.all('/apps/:port/*', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { port } = request.params as { port: string; '*': string };
+    const subPath = (request.params as { '*': string })['*'] || '';
+    const portNum = parseInt(port, 10);
+
+    // Security: only allow ports 3001-3005
+    if (isNaN(portNum) || portNum < 3001 || portNum > 3005) {
+      reply.status(400).send({ error: 'Invalid port. Allowed range: 3001-3005' });
+      return;
+    }
+
+    const targetUrl = `http://127.0.0.1:${portNum}/${subPath}`;
+    const method = request.method;
+
+    try {
+      const headers: Record<string, string> = {};
+      // Forward relevant headers
+      if (request.headers['content-type']) headers['content-type'] = request.headers['content-type'] as string;
+      if (request.headers['accept']) headers['accept'] = request.headers['accept'] as string;
+      if (request.headers['authorization']) headers['authorization'] = request.headers['authorization'] as string;
+
+      const fetchOpts: RequestInit = {
+        method,
+        headers,
+        // @ts-ignore - body forwarding
+        body: method !== 'GET' && method !== 'HEAD' ? JSON.stringify(request.body) : undefined,
+      };
+
+      if (method !== 'GET' && method !== 'HEAD' && request.headers['content-type']?.includes('application/json')) {
+        fetchOpts.body = JSON.stringify(request.body);
+      } else if (method !== 'GET' && method !== 'HEAD') {
+        fetchOpts.body = request.body as string;
+      }
+
+      const proxyRes = await fetch(targetUrl, fetchOpts);
+
+      // Forward status and headers
+      reply.status(proxyRes.status);
+      const ct = proxyRes.headers.get('content-type');
+      if (ct) reply.header('Content-Type', ct);
+      reply.header('Access-Control-Allow-Origin', '*');
+
+      const body = await proxyRes.text();
+      return reply.send(body);
+    } catch (err) {
+      reply.status(502).send({
+        error: `App not running on port ${portNum}`,
+        hint: `Start a server on port ${portNum} first. Example: shell_exec("node server.js &")`,
+      });
+    }
+  });
+
+  // Also handle root path for app ports
+  app.all('/apps/:port', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { port } = request.params as { port: string };
+    // Redirect to /apps/<port>/ to normalize
+    reply.redirect(`/apps/${port}/`);
+  });
+
   // ─── REST API: Image Upload ──────────────────────
 
   app.post('/api/chat/upload', async (request: FastifyRequest, reply: FastifyReply) => {

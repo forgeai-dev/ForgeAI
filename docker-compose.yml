@@ -35,11 +35,21 @@ services:
       dockerfile: Dockerfile
     container_name: forgeai-gateway
     restart: unless-stopped
+    # Host access: allows the agent to execute commands on the host machine via nsenter
+    # This gives the AI full control of the VPS (install packages, run services, etc.)
+    pid: "host"
+    privileged: true
     depends_on:
       mysql:
         condition: service_healthy
     ports:
       - "${GATEWAY_PORT:-18800}:18800"
+      # Dynamic app ports — agent can start Node.js/Python/etc servers on these
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+      - "3004:3004"
+      - "3005:3005"
     environment:
       # Database
       MYSQL_HOST: mysql
