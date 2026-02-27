@@ -1,53 +1,60 @@
 ## Description
 
-Major feature release: Dual environment routing, streaming heartbeat (no more timeouts), static site hosting, and native domain/HTTPS support.
+Activity Monitoring System — comprehensive logging, dashboard UI, and host command rate limiting for enhanced security visibility.
 
 ## Type of Change
 
-- [x] Bug fix
+- [ ] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
-- [x] Documentation
+- [ ] Documentation
 - [ ] Tests
 - [x] Security
 
 ## Changes Made
 
-### Dual Environment Routing
-- `packages/tools/src/tools/shell-exec.ts`: Added `target` parameter (`server`/`companion`)
-- `packages/tools/src/tools/file-manager.ts`: Added `target` parameter (`server`/`companion`)
-- `packages/core/src/gateway/companion-bridge.ts`: `CompanionToolExecutor.execute()` only delegates to Companion when `target="companion"` or tool is `desktop`
-- `packages/agent/src/runtime.ts`: System prompt includes dual environment instructions with routing rules and keyword detection
+### Activity Monitoring Backend
+- `packages/core/src/database/migrations/004_activity_log.ts`: New migration for `activity_log` table with indexes on timestamp, type, target, risk_level
+- `packages/core/src/database/connection.ts`: Added `applyMigration004` to migration runner
+- `packages/core/src/database/activity-store.ts`: `ActivityStore` service with insert, query (with filters), getStats (today's counts), cleanup, and `generateActivitySummary()` for human-readable descriptions
 
-### Streaming Heartbeat (Timeout Fix)
-- `packages/core/src/gateway/chat-routes.ts`: `/api/chat` sends periodic heartbeat spaces every 10s during long agent processing, then final JSON
-- `packages/companion/src-tauri/src/commands.rs`: `chat_send` sends `stream: true`, uses `connect_timeout` only (no total timeout), reads full body, trims heartbeats, parses JSON
+### Activity Callback in ToolRegistry
+- `packages/tools/src/registry.ts`: Added `ActivityCallback` type and `onActivity()` method — fires on every tool execution (success, failure, blocked)
+- `packages/tools/src/index.ts`: Exported `ActivityCallback` type
 
-### Static Site Hosting
-- `packages/core/src/gateway/chat-routes.ts`: New `/sites/*` route serves static files from `.forgeai/workspace/` with directory index support
-- `packages/core/src/gateway/server.ts`: `/sites/` exempt from rate limiting and authentication
-- `packages/agent/src/runtime.ts`: System prompt includes SERVER NETWORKING rules instructing agent to use `/sites/` URLs
+### API Endpoints
+- `packages/core/src/gateway/chat-routes.ts`: 
+  - `GET /api/activity` — list activities with filters (type, target, riskLevel, success, limit, offset)
+  - `GET /api/activity/stats` — today's totals (total, host, blocked, errors)
+  - Wired `ActivityStore` into `ToolRegistry.onActivity()` at initialization
 
-### Native Domain / HTTPS
-- `Caddyfile`: Caddy reverse proxy config with security headers (HSTS, X-Frame-Options, etc.), WebSocket support
-- `docker-compose.yml`: Added Caddy service with Docker Compose profile `domain`
-- `scripts/setup-domain.sh`: Interactive setup script (DNS validation, port check, .env config, deploy)
-- `.env.example`: Documented `DOMAIN` env var
+### Dashboard Activity Page
+- `packages/dashboard/src/pages/Activity.tsx`: Full Activity Monitor page with:
+  - Stats cards (total, host commands, blocked, errors)
+  - Filterable feed by target (Container/Host/Companion) and risk level
+  - Auto-refresh (5s) with live/paused toggle
+  - Color-coded risk badges with warning icons for high/critical
+  - Host command rows highlighted in amber, blocked in red
+  - Duration display, command preview, time-ago formatting
+- `packages/dashboard/src/App.tsx`: Added `/activity` route
+- `packages/dashboard/src/components/Layout.tsx`: Added Activity nav item with Activity icon
+- `packages/dashboard/src/lib/api.ts`: Added `getActivity()` and `getActivityStats()` API methods
+- `packages/dashboard/src/lib/i18n.ts`: Added `nav.activity` translations (en, pt, es) and NAV_KEYS mapping
 
-### Companion Improvements
-- `packages/companion/src-tauri/src/local_actions.rs`: Added `cwd` support, PowerShell instead of cmd
-- `packages/companion/src-tauri/src/commands.rs`: `cwd` field in `ActionRequest`
-- `packages/companion/src-tauri/src/connection.rs`: `cwd` field propagation
+### Host Command Rate Limiting
+- `packages/tools/src/tools/shell-exec.ts`: Sliding-window rate limiter (10 commands/minute) for `target="host"` commands
 
-### Documentation
-- `README.md`: Full documentation of all new features (dual routing, streaming, site hosting, domain/HTTPS, updated roadmap)
+### Host Networking & Any-Port Access
+- `docker-compose.yml`: Gateway switched to `network_mode: host`
+- `packages/core/src/gateway/chat-routes.ts`: `/apps/:port/*` allows any port 1024-65535 except reserved (18800, 3306)
+- `packages/agent/src/runtime.ts`: System prompt updated for any-port and `target="host"`
 
 ## How to Test
 
-1. **Dual Routing**: Connect Companion → ask "crie uma pasta no meu windows" (target=companion) vs "crie um site no linux" (target=server)
-2. **Streaming**: Ask a complex multi-step task → should complete without timeout errors
-3. **Static Sites**: Ask agent to create a website → accessible at `http://<server>:18800/sites/<project>/`
-4. **Domain**: Run `bash scripts/setup-domain.sh` with a valid domain → HTTPS auto-configured
+1. **Activity Logging**: Execute any tool via chat → check `/activity` page for logged entry with summary
+2. **Host Rate Limit**: Run 11 `shell_exec(target="host")` commands rapidly → 11th should be blocked
+3. **Dashboard**: Navigate to Activity page → verify live refresh, filters, stats cards
+4. **Any-Port Proxy**: Start a server on port 8080 → access via `/apps/8080/`
 
 ## Related Issue
 
@@ -56,7 +63,6 @@ N/A
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
-- [x] Companion builds without errors (`npx tauri build`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Documentation updated
+- [x] Database migration included
