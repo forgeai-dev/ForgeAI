@@ -299,10 +299,13 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
         // ─── Host execution via nsenter ───
         // nsenter -t 1 -m -u -i -n enters the host's mount/UTS/IPC/net namespaces
         // This effectively runs the command directly on the host machine as root
-        const escapedCmd = command.replace(/'/g, "'\\''");
+        // NOTE: Do NOT escape single quotes in the command itself.
+        // execFile passes args directly (no intermediate shell), so bash -c receives
+        // the raw command string. Escaping quotes here would BREAK commands like:
+        //   echo 'Chromium cleaned'  →  echo '\''Chromium cleaned'\''  →  ERROR
         const hostCmd = cwd && cwd !== this.workDir
-          ? `cd '${cwd.replace(/'/g, "'\\''")}' 2>/dev/null; ${escapedCmd}`
-          : escapedCmd;
+          ? `cd '${cwd.replace(/'/g, "'\\''")}' 2>/dev/null; ${command}`
+          : command;
         shell = '/usr/bin/nsenter';
         shellArgs = ['-t', '1', '-m', '-u', '-i', '-n', '--', '/bin/bash', '-c', hostCmd];
         this.logger.info('Executing on HOST via nsenter', { command: command.substring(0, 200) });
