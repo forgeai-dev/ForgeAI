@@ -393,7 +393,7 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -961,6 +961,8 @@ export function ChatPage() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
+    // Reset textarea height after clearing input
+    if (inputRef.current) inputRef.current.style.height = 'auto';
     setLoading(true);
     setExecutionStatus(t('chat.sending'));
 
@@ -1382,7 +1384,7 @@ export function ChatPage() {
           ) : (
           <form
             onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
-            className="flex items-center gap-2"
+            className="flex items-end gap-2"
           >
             <button
               type="button"
@@ -1424,14 +1426,25 @@ export function ChatPage() {
                 {sttBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : recording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
             )}
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize: reset height then set to scrollHeight (max 200px)
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder={sttBusy ? t('chat.transcribing') : loading ? t('chat.agentExecuting') : voiceMode ? t('chat.speakOrType') : t('chat.askAnything')}
               disabled={loading || sttBusy}
-              className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-forge-500/50 focus:border-forge-500/50 disabled:opacity-50 transition-all"
+              rows={1}
+              className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-forge-500/50 focus:border-forge-500/50 disabled:opacity-50 transition-all resize-none overflow-y-auto leading-normal max-h-[200px]"
             />
             <button
               type="submit"
