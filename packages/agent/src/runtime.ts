@@ -289,6 +289,182 @@ export class AgentRuntime {
     }
   }
 
+  // ─── Adaptive Learning System ─────────────────────────
+  // Learns from each interaction to improve over time.
+  // Categories: tool_pattern, user_preference, error_avoidance, task_insight
+  // Safety: max 200 learnings, additive only (never overrides core rules), auto-consolidate
+
+  private static readonly MAX_LEARNINGS = 200;
+  private static readonly CORRECTION_KEYWORDS = [
+    'não', 'errado', 'wrong', 'incorreto', 'isso não', 'that\'s not', 'na verdade',
+    'actually', 'corrija', 'fix', 'refaça', 'redo', 'tente de novo', 'try again',
+    'não era isso', 'não foi isso', 'não é isso', 'está errado', 'tá errado',
+  ];
+  private static readonly PRAISE_KEYWORDS = [
+    'perfeito', 'perfect', 'ótimo', 'great', 'excelente', 'excellent', 'muito bom',
+    'incrível', 'amazing', 'adorei', 'loved it', 'ficou bom', 'mandou bem', 'top',
+  ];
+
+  /**
+   * Analyze the interaction and extract learnings to improve future responses.
+   * Called after each completed interaction. No extra LLM calls — rule-based extraction.
+   */
+  private learnFromInteraction(
+    sessionId: string,
+    userMessage: string,
+    _assistantResponse: string,
+    steps: AgentStep[],
+    duration: number,
+  ): void {
+    if (!this.memoryManager) return;
+
+    const learnings: Array<{ content: string; category: string; importance: number }> = [];
+
+    // 1. Detect user corrections (previous message was a correction of our work)
+    const history = this.conversationHistory.get(sessionId);
+    if (history && history.length >= 3) {
+      const prevUser = history[history.length - 3]; // user msg before current
+      const prevAssistant = history[history.length - 2]; // our previous response
+      if (prevUser?.role === 'user' && prevAssistant?.role === 'assistant') {
+        const userLower = userMessage.toLowerCase();
+        const isCorrection = AgentRuntime.CORRECTION_KEYWORDS.some(kw => userLower.includes(kw));
+        if (isCorrection) {
+          const snippet = prevAssistant.content.substring(0, 150);
+          learnings.push({
+            content: `User corrected a response. Original: "${snippet}..." Correction request: "${userMessage.substring(0, 200)}"`,
+            category: 'error_avoidance',
+            importance: 0.85,
+          });
+        }
+      }
+    }
+
+    // 2. Detect user praise → reinforce the pattern
+    const userLower = userMessage.toLowerCase();
+    const isPraise = AgentRuntime.PRAISE_KEYWORDS.some(kw => userLower.includes(kw));
+    if (isPraise && history && history.length >= 2) {
+      const prevAssistant = history[history.length - 2];
+      if (prevAssistant?.role === 'assistant') {
+        learnings.push({
+          content: `User praised this approach: "${prevAssistant.content.substring(0, 200)}..." (reinforce this pattern)`,
+          category: 'user_preference',
+          importance: 0.75,
+        });
+      }
+    }
+
+    // 3. Learn from tool patterns: which tools succeeded/failed
+    if (steps.length > 0) {
+      const toolResults = steps.filter(s => s.type === 'tool_result');
+      const failures = toolResults.filter(s => s.success === false);
+      const successes = toolResults.filter(s => s.success === true);
+
+      // Store error patterns to avoid repeating mistakes
+      for (const fail of failures) {
+        if (fail.result && fail.tool) {
+          const errorSnippet = fail.result.substring(0, 200);
+          learnings.push({
+            content: `Tool ${fail.tool} failed: "${errorSnippet}". Avoid this pattern in similar tasks.`,
+            category: 'error_avoidance',
+            importance: 0.8,
+          });
+        }
+      }
+
+      // Store successful complex task patterns (3+ tool calls = complex task)
+      if (successes.length >= 3 && failures.length === 0) {
+        const toolSequence = steps
+          .filter(s => s.type === 'tool_call')
+          .map(s => s.tool)
+          .join(' → ');
+        const taskHint = userMessage.substring(0, 150);
+        learnings.push({
+          content: `Successful pattern for "${taskHint}": ${toolSequence} (${successes.length} steps, ${Math.round(duration / 1000)}s)`,
+          category: 'task_insight',
+          importance: 0.7,
+        });
+      }
+    }
+
+    // 4. Detect user language/style preference
+    if (history && history.length === 2) { // First interaction in session
+      const lang = /[àáâãéêíóôõúç]/.test(userMessage) ? 'pt-BR' : 'en';
+      const isInformal = /vc|pra |tb |blz|kk|rs|haha|kkk|né|tá |ta /i.test(userMessage);
+      if (isInformal) {
+        learnings.push({
+          content: `User prefers informal ${lang} communication style. Use casual tone.`,
+          category: 'user_preference',
+          importance: 0.65,
+        });
+      }
+    }
+
+    // Store all extracted learnings
+    for (const learning of learnings) {
+      // Check if a similar learning already exists (avoid duplicates)
+      const existing = this.memoryManager.search(learning.content, 1);
+      if (existing.length > 0 && existing[0].score > 0.85) {
+        continue; // Skip near-duplicate
+      }
+
+      // Count current learnings to enforce limit
+      const allLearnings = this.memoryManager.search('learning', 999);
+      const learningCount = allLearnings.filter(r => r.entry.metadata?.type === 'learning').length;
+      if (learningCount >= AgentRuntime.MAX_LEARNINGS) {
+        // Consolidate before adding more
+        this.memoryManager.consolidate();
+      }
+
+      const memId = `learn-${learning.category}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      this.memoryManager.store(memId, learning.content, {
+        type: 'learning',
+        category: learning.category,
+        important: learning.importance > 0.7,
+        agentId: this.config.id,
+      });
+
+      logger.debug('Learning stored', { category: learning.category, content: learning.content.substring(0, 80) });
+    }
+  }
+
+  /**
+   * Build learning context to inject into system prompt.
+   * Retrieves relevant learnings based on the current user message.
+   */
+  private buildLearningContext(userMessage: string): string | null {
+    if (!this.memoryManager) return null;
+
+    // Search for learnings relevant to the current message
+    const results = this.memoryManager.search(userMessage, 10);
+    const learnings = results.filter(r => r.entry.metadata?.type === 'learning' && r.score > 0.25);
+
+    if (learnings.length === 0) return null;
+
+    // Group by category
+    const grouped: Record<string, string[]> = {};
+    for (const r of learnings.slice(0, 8)) {
+      const cat = (r.entry.metadata?.category as string) || 'general';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(r.entry.content);
+    }
+
+    const lines: string[] = [];
+    if (grouped['error_avoidance']) {
+      lines.push('Errors to avoid: ' + grouped['error_avoidance'].join('; '));
+    }
+    if (grouped['user_preference']) {
+      lines.push('User preferences: ' + grouped['user_preference'].join('; '));
+    }
+    if (grouped['task_insight']) {
+      lines.push('Successful patterns: ' + grouped['task_insight'].join('; '));
+    }
+
+    if (lines.length === 0) return null;
+
+    logger.debug('Learning context injected', { count: learnings.length });
+    return `Adaptive learnings (from past interactions — use these to improve):\n${lines.join('\n')}`;
+  }
+
   /**
    * Build a compact topic summary from session history.
    */
@@ -574,6 +750,10 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       if (memoryContext) {
         enrichedSystemPrompt += `\n\n--- Cross-Session Memory ---\n${memoryContext}`;
       }
+      const learningContext = this.buildLearningContext(params.content);
+      if (learningContext) {
+        enrichedSystemPrompt += `\n\n--- ${learningContext}`;
+      }
     }
     // For local LLMs, limit history to last 4 messages to keep context small
     const historyToUse = isLocalLLM ? history.slice(-4) : history;
@@ -847,6 +1027,9 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
 
       // Auto-store cross-session memory
       this.storeSessionMemory(params.sessionId, params.content, response!.content);
+
+      // Adaptive learning: extract patterns from this interaction
+      this.learnFromInteraction(params.sessionId, params.content, response!.content, steps, duration);
 
       // Smart prune: summarize old context if exceeding token limit
       await this.smartPrune(params.sessionId);
