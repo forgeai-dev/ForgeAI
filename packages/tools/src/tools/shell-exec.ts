@@ -167,10 +167,11 @@ export class ShellExecTool extends BaseTool {
 
   readonly definition: ToolDefinition = {
     name: 'shell_exec',
-    description: `Execute shell commands with full system access. The agent runs with admin/root privileges on this machine.
+    description: `Execute shell commands with full system access. The agent runs with admin/root privileges.
 Use this for: npm, git, python, node, docker, system config, package installs, service management, file operations anywhere on disk, and any CLI tool.
 Default working directory is .forgeai/workspace/ but you can set cwd to any absolute path.
 On Windows: uses PowerShell. On Linux: uses /bin/bash.
+Target options: "server" (default, inside Docker), "host" (directly on the VPS/host machine — use for installing packages with apt, running systemctl, Python, etc.), "companion" (user's Windows PC).
 Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are blocked. All commands are audit-logged.`,
     category: 'utility',
     dangerous: true,
@@ -178,7 +179,7 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       { name: 'command', type: 'string', description: 'Shell command to execute (e.g. "npm init -y", "dir", "node index.js", "docker ps")', required: true },
       { name: 'cwd', type: 'string', description: 'Working directory. Relative paths resolve from workspace. Absolute paths (e.g. "C:\\Users" or "/home") are allowed.', required: false },
       { name: 'timeout', type: 'number', description: 'Timeout in ms (default: 60000). Set higher for long tasks like npm install.', required: false },
-      { name: 'target', type: 'string', description: 'Where to execute: "server" (default, Linux/Gateway) or "companion" (user\'s Windows machine via ForgeAI Companion). Only use "companion" when the user explicitly asks to do something on their Windows/local machine.', required: false },
+      { name: 'target', type: 'string', description: 'Where to execute: "server" (default, inside Docker container), "host" (directly on the VPS/host machine — use for apt install, systemctl, Python, services, anything that needs the real OS), or "companion" (user\'s Windows PC via ForgeAI Companion).', required: false },
     ],
   };
 
@@ -197,6 +198,10 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
     const command = String(params['command']).trim();
     const cwdParam = params['cwd'] ? String(params['cwd']).trim() : '';
     const timeout = Number(params['timeout']) || DEFAULT_TIMEOUT;
+    const target = String(params['target'] || 'server').toLowerCase();
+
+    // ─── Host execution: target="host" uses nsenter to run on the VPS directly ───
+    const isHostTarget = target === 'host';
 
     // ─── Security Layer 1: Hard-block destructive OS commands ───
     const lowerCmd = command.toLowerCase().replace(/\s+/g, ' ');
@@ -261,7 +266,7 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       }
     }
 
-    const { result, duration } = await this.timed(() => this.runCommand(command, cwd, timeout));
+    const { result, duration } = await this.timed(() => this.runCommand(command, cwd, timeout, isHostTarget));
 
     this.logger.debug('Shell command executed', {
       command: command.substring(0, 200),
@@ -287,21 +292,37 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
     };
   }
 
-  private runCommand(command: string, cwd: string, timeout: number): Promise<{
+  private runCommand(command: string, cwd: string, timeout: number, isHostTarget = false): Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;
   }> {
     return new Promise((resolve) => {
-      // Windows: PowerShell for admin capabilities
-      // Linux: /bin/bash for full shell features
-      const shell = IS_WINDOWS ? 'powershell.exe' : '/bin/bash';
-      const shellArgs = IS_WINDOWS
-        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command]
-        : ['-c', command];
+      let shell: string;
+      let shellArgs: string[];
+
+      if (isHostTarget && !IS_WINDOWS) {
+        // ─── Host execution via nsenter ───
+        // nsenter -t 1 -m -u -i -n enters the host's mount/UTS/IPC/net namespaces
+        // This effectively runs the command directly on the host machine as root
+        const escapedCmd = command.replace(/'/g, "'\\''");
+        const hostCmd = cwd && cwd !== this.workDir
+          ? `cd '${cwd.replace(/'/g, "'\\''")}' 2>/dev/null; ${escapedCmd}`
+          : escapedCmd;
+        shell = '/usr/bin/nsenter';
+        shellArgs = ['-t', '1', '-m', '-u', '-i', '-n', '--', '/bin/bash', '-c', hostCmd];
+        this.logger.info('Executing on HOST via nsenter', { command: command.substring(0, 200) });
+      } else {
+        // Windows: PowerShell for admin capabilities
+        // Linux: /bin/bash for full shell features (inside Docker)
+        shell = IS_WINDOWS ? 'powershell.exe' : '/bin/bash';
+        shellArgs = IS_WINDOWS
+          ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command]
+          : ['-c', command];
+      }
 
       const proc = execFile(shell, shellArgs, {
-        cwd,
+        cwd: isHostTarget ? undefined : cwd,
         timeout,
         maxBuffer: MAX_OUTPUT_SIZE,
         env: {

@@ -47,9 +47,9 @@ FROM node:22-slim AS production
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install Chromium for Puppeteer
+# Install Chromium for Puppeteer + util-linux (nsenter for host access)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends chromium && \
+    apt-get install -y --no-install-recommends chromium util-linux && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
@@ -92,8 +92,8 @@ COPY packages/core/src/database packages/core/src/database
 # Create data directory
 RUN mkdir -p /app/.forgeai
 
-# Expose ports
-EXPOSE 18800
+# Expose ports (gateway + dynamic app ports)
+EXPOSE 18800 3001 3002 3003 3004 3005
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
