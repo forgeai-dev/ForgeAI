@@ -306,10 +306,11 @@ async function applyMigration005(db: Knex): Promise<void> {
       table.integer('match_count').notNullable().defaultTo(1);
       table.timestamp('created_at').defaultTo(db.fn.now());
       table.timestamp('updated_at').defaultTo(db.fn.now());
-      table.index('url');
       table.index('last_matched');
       table.index('match_count');
     });
+    // Prefix index for URL (191 chars max for utf8mb4 within 3072-byte key limit)
+    await db.raw('CREATE INDEX `element_fingerprints_url_index` ON `element_fingerprints` (`url`(191))');
     logger.info('Created element_fingerprints table');
   }
 }

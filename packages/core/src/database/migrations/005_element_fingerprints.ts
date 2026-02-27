@@ -11,10 +11,11 @@ export async function up(knex: Knex): Promise<void> {
     table.timestamp('created_at').defaultTo(knex.fn.now());
     table.timestamp('updated_at').defaultTo(knex.fn.now());
 
-    table.index('url');
     table.index('last_matched');
     table.index('match_count');
   });
+  // Prefix index for URL (191 chars max for utf8mb4 within 3072-byte key limit)
+  await knex.raw('CREATE INDEX `element_fingerprints_url_index` ON `element_fingerprints` (`url`(191))');
 }
 
 export async function down(knex: Knex): Promise<void> {

@@ -833,8 +833,8 @@ export class PuppeteerBrowserTool extends BaseTool {
   private async saveFingerprint(page: Page, selector: string): Promise<void> {
     try {
       const url = page.url();
-      const extractFn = new Function('return ' + EXTRACT_CANDIDATES_SCRIPT)();
-      const result = await page.evaluate(extractFn, selector) as { found: boolean; element: CandidateElement | null };
+      // safe: EXTRACT_CANDIDATES_SCRIPT is a compile-time constant, selector is JSON-serialized
+      const result = await page.evaluate(`(${EXTRACT_CANDIDATES_SCRIPT})(${JSON.stringify(selector)})`) as { found: boolean; element: CandidateElement | null };
 
       if (result.found && result.element) {
         const fingerprint = createFingerprint(url, selector, result.element);
@@ -854,8 +854,8 @@ export class PuppeteerBrowserTool extends BaseTool {
       if (!fingerprint) return null;
 
       // Extract all candidate elements from the current page
-      const extractFn = new Function('return ' + EXTRACT_CANDIDATES_SCRIPT)();
-      const result = await page.evaluate(extractFn, null) as { found: boolean; candidates?: CandidateElement[] };
+      // safe: EXTRACT_CANDIDATES_SCRIPT is a compile-time constant, no user input
+      const result = await page.evaluate(`(${EXTRACT_CANDIDATES_SCRIPT})(null)`) as { found: boolean; candidates?: CandidateElement[] };
 
       if (!result.candidates || result.candidates.length === 0) return null;
 
