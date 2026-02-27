@@ -14,12 +14,12 @@
 
 <br />
 
-| 8 Channels | 10 LLM Providers | 13 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
+| 8 Channels | 10 LLM Providers | 15 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
 
-[Getting Started](#-quick-start) · [Features](#-features-at-a-glance) · [Dashboard](#-dashboard-17-pages) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](./CONTRIBUTING.md)
+[Getting Started](#-quick-start) · [Features](#-features-at-a-glance) · [Dashboard](#-dashboard-19-pages) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](./CONTRIBUTING.md)
 
 </div>
 
@@ -33,12 +33,12 @@
 
 ## What is ForgeAI?
 
-ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and **IoT/embedded devices** via the Node Protocol — all managed through a modern 17-page dashboard.
+ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and **IoT/embedded devices** via the Node Protocol — all managed through a modern 19-page dashboard.
 
 Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 9 security modules before reaching the agent.
 
 ```
-Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 13 Tools ──→ Response
+Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 15 Tools ──→ Response
      ↑                                                              ↓
   WhatsApp                                                    Browse web
   Telegram                                                    Run code
@@ -46,7 +46,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 13
   Slack                                                       Screenshots
   Teams                                                       Shell commands
   Google Chat                                                  Schedule tasks
-  WebChat                                                      Agent-to-Agent
+  WebChat                                                      Smart home/Spotify
   Node Protocol                                                IoT devices
 ```
 
@@ -65,7 +65,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 13
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
 
 ### 🤖 Autonomous Agent
-The agentic loop runs up to **25 iterations** per request. The agent browses the web, executes code, manages files, takes screenshots, schedules tasks, and communicates with other agents — all without human intervention.
+The agentic loop runs up to **25 iterations** per request. The agent browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses and fixes its own tool failures (Chromium locks, port conflicts, permissions).
 
 </td>
 <td width="50%">
@@ -74,7 +74,7 @@ The agentic loop runs up to **25 iterations** per request. The agent browses the
 Anthropic, OpenAI, Google, Moonshot/Kimi, DeepSeek, xAI/Grok, Groq, Mistral, **Local LLMs** (Ollama), and **OpenAI-Compatible** (LM Studio/llama.cpp/vLLM). Circuit breaker per provider, exponential backoff, automatic fallback chain. Cloud ↔ local failover — if all cloud providers go down, your local model picks up.
 
 ### 📊 Full Observability
-17-page dashboard with real-time WebSocket updates (including RAG management, Voice, and more). See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
+19-page dashboard with real-time WebSocket updates (including RAG management, Voice, and more). See what the agent is thinking, which tools it's calling, how much it costs, and the credit balance remaining on each provider. OpenTelemetry traces and metrics built-in.
 
 ### 🧩 Extensible Everything
 Plugin SDK for custom behaviors. MCP Client for external tool servers. Workflow engine for multi-step automation. RAG engine for document search. REST API with 140+ endpoints for full programmatic control.
@@ -153,12 +153,12 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 > **💡 Subscription-Based API Access (Anthropic)**
 > You don't need a pay-as-you-go API key to use Claude. If you have a **Claude Pro**, **Max**, or **CLI** subscription plan, you can use the API key tied to your plan. ForgeAI treats it like any other Anthropic key — just paste it in Dashboard → Settings → Anthropic. The billing goes through your existing subscription instead of per-token charges. This is especially useful for accessing **Claude Opus 4.6** at a fixed monthly cost.
 
-### Built-in Tools (13)
+### Built-in Tools (15)
 
 | Tool | What it does |
 |:-----|:-------------|
-| `web_browse` | HTTP fetch + parse (Cheerio). GET/POST/PUT/DELETE, custom headers, extract: text/links/images/tables/metadata/json. |
-| `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab, **multi-profile** (persistent logins), **file upload**, **DOM snapshots**. |
+| `web_browse` | HTTP fetch + parse (Cheerio). GET/POST/PUT/DELETE, custom headers, extract: text/links/images/tables/metadata/json/**markdown** (HTML→clean Markdown via Turndown). **Adaptive element tracking** — re-locates elements when selectors break using fingerprint similarity matching. |
+| `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab, **multi-profile** (persistent logins), **file upload**, **DOM snapshots**. **Stealth anti-detection** (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). **Native proxy rotation**. **Adaptive element tracking** — re-locates elements when selectors break using fingerprint similarity matching. |
 | `web_search` | Search Google/DuckDuckGo — returns structured results (title, URL, snippet). Auto-fallback between engines. |
 | `file_manager` | Full system file manager: read, write, list, delete, copy, move, search, permissions (chmod), disk info. Supports absolute paths for full system access. |
 | `shell_exec` | Execute system commands with timeout, output capture, and error handling. |
@@ -170,6 +170,8 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `sessions_history` | Fetch full transcript of any session (agent-to-agent communication). |
 | `sessions_send` | Send messages between agents for collaborative multi-agent workflows. |
 | `image_generate` | Generate images via DALL-E 3, Leonardo AI, or Stable Diffusion. Save to disk. |
+| `smart_home` | Control smart home devices and routines via natural language. Home Assistant integration. |
+| `spotify` | Spotify playback control: play/pause/skip, search, playlists, queue management, device switching. |
 
 ### Security Modules (9)
 
@@ -210,7 +212,7 @@ This means running ForgeAI on a **VPS** is just as secure as running it locally 
 
 ---
 
-## 📊 Dashboard (17 Pages)
+## 📊 Dashboard (19 Pages)
 
 The dashboard is a full-featured React 19 SPA served directly by the Gateway. No separate deployment needed.
 
@@ -687,7 +689,7 @@ API endpoints:
               ┌────────────▼──┐  ┌────▼──────────┐
               │  AGENT LAYER   │  │   TOOL LAYER   │
               │                │  │                 │
-              │ AgentManager   │  │ 13 built-in     │
+              │ AgentManager   │  │ 15 built-in     │
               │ AgentRuntime   │  │ MCP Client      │
               │ LLM Router     │  │ Tool Registry   │
               │ 10 providers   │  │ Sandbox (Docker) │
@@ -892,15 +894,15 @@ pnpm forge status      # Quick status check
 
 ## 🗺 Roadmap
 
-### Completed — 26 Phases
+### Completed — 29 Phases
 
 All core features are implemented and tested:
 
 - **Security** — 9 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, Email OTP (external access), setup wizard, audit
 - **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol (IoT)
-- **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
-- **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
+- **Tools** — 15 built-in + MCP Client + Puppeteer + Shell + Sandbox
+- **Dashboard** — 19 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
@@ -919,6 +921,9 @@ All core features are implemented and tested:
 - **Streaming Heartbeat** — Gateway sends periodic heartbeat spaces during long agent processing to keep HTTP connections alive. Companion reads full response, trims heartbeats, parses final JSON. Eliminates timeout errors on complex multi-step tasks regardless of duration
 - **Static Site Hosting** — `/sites/*` route on Gateway serves static files from `.forgeai/workspace/` with directory index support. Agent creates websites directly in workspace, instantly accessible via public URL. No HTTP server needed, no extra ports
 - **Native Domain / HTTPS** — Built-in Caddy reverse proxy with automatic Let's Encrypt SSL. Docker Compose profile (`--profile domain`). Interactive `setup-domain.sh` script validates DNS, checks ports, configures `.env`, and deploys. Security headers (HSTS, X-Frame-Options, etc.) included
+- **Stealth Browser + Proxy + Markdown** — Puppeteer stealth anti-detection (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). Native proxy rotation for browser and HTTP requests. HTML→clean Markdown extraction via Turndown in `web_browse`
+- **Adaptive Element Tracking** — Fingerprint-based element re-location when CSS selectors break. Jaccard similarity on attributes/text/parent chain with weighted scoring and confidence thresholds (high/medium/low). MySQL persistence for fingerprints. Works in both Puppeteer and Cheerio-based tools
+- **Agent Autonomy & Self-Management** — Full unrestricted root access on host (`target="host"`). Agent self-management instructions: auto-repair Chromium locks, port conflicts, disk issues, permission errors. Refined anti-catastrophe protection (precise regex for `rm -rf`, no false positives on `/tmp/`). Smart home (`smart_home`) and Spotify (`spotify`) tools
 
 ### What's Next
 
@@ -933,10 +938,16 @@ All core features are implemented and tested:
 | ~~Streaming heartbeat (no timeout on complex tasks)~~ | ✅ Done |
 | ~~Static site hosting via Gateway~~ | ✅ Done |
 | ~~Native domain / HTTPS (Caddy + Let's Encrypt)~~ | ✅ Done |
+| ~~Stealth browser + proxy rotation + markdown extraction~~ | ✅ Done |
+| ~~Adaptive element tracking (fingerprint matching)~~ | ✅ Done |
+| ~~Agent self-management + full root access~~ | ✅ Done |
+| ~~Smart Home + Spotify tools~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |
 | ELK/Loki log aggregation | Medium |
+| Community plugin marketplace | Medium |
+| Website automation (migrate from static HTML) | Low |
 
 See **[ROADMAP.md](./ROADMAP.md)** for the full development history.
 
