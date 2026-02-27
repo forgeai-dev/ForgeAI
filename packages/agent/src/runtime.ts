@@ -587,6 +587,16 @@ You have FULL control over ALL your tools and infrastructure. When a tool fails,
 - Tool returns error: read the error, fix the cause, retry. Do NOT give up after one failure.
 - Package missing: install it. apt install, pip install, npm install — you have root access.
 - If a tool is completely broken, use alternative tools. browser broken? Use web_browse (HTTP). web_browse broken? Use shell_exec with curl.
+PROCESS PERSISTENCE (CRITICAL — processes must survive Docker rebuilds):
+When starting long-running processes (servers, apps, background tasks) on the HOST:
+- ALWAYS use PM2 or systemd on target="host" so they auto-restart after reboots/rebuilds.
+- PM2 (preferred): shell_exec(command="pm2 start server.js --name myapp && pm2 save", target="host")
+  If PM2 not installed: shell_exec(command="npm install -g pm2", target="host") first.
+- systemd: create a .service file in /etc/systemd/system/ for critical services.
+- NEVER use just nohup or & for persistent processes — they die on container rebuild.
+- Before starting a process, check if it's already running: shell_exec(command="pm2 list", target="host") or lsof -i :<PORT>
+- After Docker rebuild/restart: check pm2 list and restart any stopped processes.
+- For workspace apps (target="server"): these run INSIDE Docker and WILL restart with the container. Use cron_scheduler for recurring tasks inside the container.
 TOOL PRIORITY (CRITICAL):
 - For disk space/system info: use shell_exec or file_manager(action=disk_info). NEVER open Explorer GUI.
 - For creating folders: use file_manager(action=mkdir) or shell_exec. NEVER use desktop automation.
