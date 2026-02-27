@@ -162,6 +162,24 @@ const KILL_ALL_NODE_REGEX = [
   /get-process\s+.*node.*\|.*stop-process/i,
 ];
 
+// ─── Host command rate limiter (10 commands/minute) ───
+const HOST_RATE_LIMIT = 10;
+const HOST_RATE_WINDOW_MS = 60_000;
+const hostCommandTimestamps: number[] = [];
+
+function checkHostRateLimit(): boolean {
+  const now = Date.now();
+  // Remove timestamps older than the window
+  while (hostCommandTimestamps.length > 0 && hostCommandTimestamps[0]! < now - HOST_RATE_WINDOW_MS) {
+    hostCommandTimestamps.shift();
+  }
+  if (hostCommandTimestamps.length >= HOST_RATE_LIMIT) {
+    return false;
+  }
+  hostCommandTimestamps.push(now);
+  return true;
+}
+
 export class ShellExecTool extends BaseTool {
   private workDir: string;
 
@@ -202,6 +220,16 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
 
     // ─── Host execution: target="host" uses nsenter to run on the VPS directly ───
     const isHostTarget = target === 'host';
+
+    // ─── Host rate limit: max 10 host commands per minute ───
+    if (isHostTarget && !checkHostRateLimit()) {
+      this.logger.warn('Host command rate limit exceeded', { command });
+      return {
+        success: false,
+        error: `⚠️ Host command rate limit exceeded (max ${HOST_RATE_LIMIT}/minute). Wait a moment before running more host commands.`,
+        duration: 0,
+      };
+    }
 
     // ─── Security Layer 1: Hard-block destructive OS commands ───
     const lowerCmd = command.toLowerCase().replace(/\s+/g, ' ');

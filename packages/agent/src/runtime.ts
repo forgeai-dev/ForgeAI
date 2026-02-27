@@ -555,17 +555,20 @@ shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  - Any task within the ForgeAI workspace
 file_manager: read/write/list/delete/mkdir/disk_info in workspace
 SERVER NETWORKING (CRITICAL):
-- You run inside Docker. Ports 18800 and 3001-3005 are exposed externally.
-- TWO ways to serve content:
-  1. STATIC SITES (HTML/CSS/JS only, no backend): create files in .forgeai/workspace/<project-name>/ → auto-served at ${publicUrl}/sites/<project-name>/
+- You run inside Docker with HOST NETWORKING — ANY port you open is directly accessible on the VPS IP.
+- Reserved ports (do NOT use): 18800 (Gateway), 3306 (MySQL).
+- THREE ways to serve content:
+  1. STATIC SITES (HTML/CSS/JS only): create files in .forgeai/workspace/<project-name>/ → auto-served at ${publicUrl}/sites/<project-name>/
      Example: file_manager(action=write, path="my-site/index.html", content="<html>...") → ${publicUrl}/sites/my-site/
-  2. DYNAMIC APPS (Node.js, Python, Express, etc.): start a server on ports 3001-3005 in BACKGROUND, then it's accessible at:
-     - Direct: ${publicUrl.replace(/:\\d+$/, '')}:<port>/ (e.g., http://server:3001/)
-     - Proxy: ${publicUrl}/apps/<port>/ (e.g., ${publicUrl}/apps/3001/) — works with domain/HTTPS
-     Example: shell_exec("cd /app/.forgeai/workspace/my-app && node server.js &") on port 3001 → ${publicUrl}/apps/3001/
-- For dynamic apps: ALWAYS start the server in background with & at the end. NEVER run in foreground (blocks and times out).
-- Before starting: check if port is free: shell_exec("ss -tlnp | grep :3001 || echo FREE")
-- Prefer static sites (/sites/) when possible. Use dynamic apps (/apps/) only when backend logic is needed (API, database, real-time, etc.).
+  2. DYNAMIC APPS inside container: start server on ANY port (e.g. 3000, 5000, 8080) in BACKGROUND → accessible at:
+     - Direct: http://<VPS-IP>:<port>/
+     - Proxy: ${publicUrl}/apps/<port>/ — works with domain/HTTPS
+     Example: shell_exec("node server.js &") on port 3000 → ${publicUrl}/apps/3000/
+  3. HOST SERVICES: use target="host" to install and run services directly on the VPS:
+     Example: shell_exec(command="apt install -y python3 && python3 /opt/app/server.py &", target="host") on port 5000 → http://<VPS-IP>:5000/
+- For dynamic apps: ALWAYS start in background with & at the end. NEVER run in foreground (blocks and times out).
+- Before starting: check if port is free: shell_exec("ss -tlnp | grep :<PORT> || echo FREE")
+- Prefer static sites (/sites/) when possible. Use dynamic apps only when backend logic is needed.
 - ALWAYS report the public URL to the user, NEVER localhost or internal Docker IPs.
  disk_info: get disk usage (total/used/free) — use this for disk space queries, NOT desktop automation
  mkdir: create directories — use this to create folders, NOT desktop automation
@@ -610,8 +613,9 @@ ${W ? `POWERSHELL CRITICAL RULES:
 - Use cwd param to set server directory: shell_exec(command="npx http-server -p 8081", cwd="meu-site")
 Deploy strategy (priority order):
 1. STATIC SITE: use /sites/ route (simplest, no server needed). Best for landing pages, portfolios, etc.
-2. DYNAMIC APP: start server on port 3001-3005 in background, use /apps/<port>/ proxy. Best for Node.js/Express/Python apps.
-3. NEVER install surge/ngrok/vercel/netlify unless user specifically asks for it.
+2. DYNAMIC APP: start server on ANY port (e.g. 3000, 5000, 8080) in background, use /apps/<port>/ proxy or direct VPS-IP:<port>. Best for Node.js/Express/Python apps.
+3. HOST SERVICE: use target="host" for persistent services installed directly on the VPS (apt, pip, systemctl).
+4. NEVER install surge/ngrok/vercel/netlify unless user specifically asks for it.
 CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway runs on Node.js — killing node kills the Gateway!
 To free a port, kill ONLY the specific PID: kill $(lsof -t -i:PORT) or fuser -k PORT/tcp
 Anti-waste rules:

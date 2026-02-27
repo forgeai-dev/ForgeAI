@@ -4,7 +4,7 @@
 
 {$DOMAIN:localhost} {
 	# Reverse proxy to the Gateway container
-	reverse_proxy gateway:18800
+	reverse_proxy localhost:18800
 
 	# Security headers
 	header {

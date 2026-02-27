@@ -94,6 +94,14 @@ export async function runMigrations(): Promise<void> {
       logger.info('Migration 003_audit_hash_chain applied');
     }
 
+    // Migration 4: Activity Log
+    if (currentVersion < 4) {
+      logger.info('Applying migration 004_activity_log...');
+      await applyMigration004(database);
+      await database('forgeai_migrations').insert({ version: 4, name: '004_activity_log' });
+      logger.info('Migration 004_activity_log applied');
+    }
+
     logger.info('All migrations applied successfully');
   } catch (error) {
     logger.error('Migration failed', error);
@@ -250,6 +258,31 @@ async function applyMigration003(db: Knex): Promise<void> {
       table.index('hash');
     });
     logger.info('Added hash chain columns to audit_log');
+  }
+}
+
+async function applyMigration004(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('activity_log');
+  if (!hasTable) {
+    await db.schema.createTable('activity_log', (table) => {
+      table.bigIncrements('id');
+      table.timestamp('timestamp').notNullable().defaultTo(db.fn.now());
+      table.string('type', 32).notNullable();
+      table.string('tool_name', 64).notNullable();
+      table.string('target', 16).notNullable().defaultTo('server');
+      table.string('command', 1024).nullable();
+      table.string('summary', 512).notNullable();
+      table.enum('risk_level', ['low', 'medium', 'high', 'critical']).notNullable().defaultTo('low');
+      table.boolean('success').notNullable().defaultTo(true);
+      table.integer('duration_ms').nullable();
+      table.string('session_id', 64).nullable();
+      table.string('user_id', 64).nullable();
+      table.index('timestamp');
+      table.index('type');
+      table.index('target');
+      table.index('risk_level');
+    });
+    logger.info('Created activity_log table');
   }
 }
 

@@ -18,6 +18,7 @@ import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef } 
 import { createAutopilotEngine, type AutopilotEngine } from '../autopilot/autopilot-engine.js';
 import { createPairingManager, type PairingManager } from '../pairing/pairing-manager.js';
 import { ChatHistoryStore, createChatHistoryStore, type StoredMessage } from '../chat-history-store.js';
+import { ActivityStore, generateActivitySummary } from '../database/activity-store.js';
 import { loadWorkspacePrompts, getWorkspacePromptFiles } from '@forgeai/agent';
 import { createOTelManager, type OTelManager } from '../telemetry/otel-manager.js';
 import { createArtifactManager, type ArtifactManager } from '../artifact/artifact-manager.js';
@@ -64,6 +65,7 @@ let artifactManager: ArtifactManager | null = null;
 let sessionRecorder: SessionRecorder | null = null;
 let homeAssistantIntegration: HomeAssistantIntegration | null = null;
 let spotifyIntegration: SpotifyIntegration | null = null;
+let activityStore: ActivityStore | null = null;
 
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
@@ -357,6 +359,31 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // Initialize Tool Registry and attach to AgentManager (propagates to all agents)
   toolRegistry = createDefaultToolRegistry();
   agentManager.setToolExecutor(toolRegistry);
+
+  // Initialize Activity Store for human-readable monitoring
+  try {
+    const { getDatabase } = await import('../database/connection.js');
+    const db = getDatabase();
+    activityStore = new ActivityStore(db);
+    (toolRegistry as any).onActivity((event: { toolName: string; params: Record<string, unknown>; success: boolean; blocked: boolean; duration: number; userId?: string }) => {
+      const info = generateActivitySummary(event.toolName, event.params, event.success, event.blocked);
+      activityStore!.insert({
+        timestamp: new Date(),
+        type: info.type,
+        toolName: event.toolName,
+        target: info.target,
+        command: info.command,
+        summary: info.summary,
+        riskLevel: info.riskLevel,
+        success: event.success,
+        durationMs: event.duration,
+        userId: event.userId,
+      }).catch(() => {});
+    });
+    logger.info('Activity monitoring initialized');
+  } catch (_err) {
+    logger.warn('Activity store not available (DB not ready)');
+  }
 
   // Wire session tools with AgentManager for agent-to-agent communication
   setAgentManagerRef(agentManager);
@@ -2433,6 +2460,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return reply.send(createReadStream(filePath));
   });
 
+  // ─── REST API: Activity Monitoring ─────────────────
+
+  app.get('/api/activity', async (request: FastifyRequest) => {
+    if (!activityStore) return { activities: [], stats: null };
+    const query = request.query as Record<string, string>;
+    const activities = await activityStore.query({
+      type: query['type'] || undefined,
+      target: query['target'] || undefined,
+      riskLevel: query['riskLevel'] || undefined,
+      success: query['success'] !== undefined ? query['success'] === 'true' : undefined,
+      limit: Math.min(Number(query['limit']) || 100, 500),
+      offset: Number(query['offset']) || 0,
+    });
+    return { activities };
+  });
+
+  app.get('/api/activity/stats', async () => {
+    if (!activityStore) return { stats: { totalToday: 0, hostToday: 0, blockedToday: 0, errorToday: 0 } };
+    const stats = await activityStore.getStats();
+    return { stats };
+  });
+
   // ─── REST API: Dynamic App Proxy ──────────────────
   // Proxies /apps/<port>/* to localhost:<port> inside Docker.
   // Allows agent-started servers (Node.js, Python, etc.) to be accessible
@@ -2444,9 +2493,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     const subPath = (request.params as { '*': string })['*'] || '';
     const portNum = parseInt(port, 10);
 
-    // Security: only allow ports 3001-3005
-    if (isNaN(portNum) || portNum < 3001 || portNum > 3005) {
-      reply.status(400).send({ error: 'Invalid port. Allowed range: 3001-3005' });
+    // Security: block reserved ports (Gateway, MySQL, system ports)
+    const RESERVED_PORTS = [18800, 3306];
+    if (isNaN(portNum) || portNum < 1024 || portNum > 65535 || RESERVED_PORTS.includes(portNum)) {
+      reply.status(400).send({ error: `Invalid port. Must be 1024-65535 and not reserved (${RESERVED_PORTS.join(', ')}).` });
       return;
     }
 

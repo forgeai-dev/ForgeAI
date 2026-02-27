@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare, Wrench, BarChart3, Shield, Settings, Flame, Store, Radio, Users, Brain, Mail, Database, Key, Webhook, CalendarDays, AudioLines, Layers, Video, Menu, X, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Wrench, BarChart3, Shield, Settings, Flame, Store, Radio, Users, Brain, Mail, Database, Key, Webhook, CalendarDays, AudioLines, Layers, Video, Activity, Menu, X, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -22,6 +22,7 @@ const navItems = [
   { to: '/voice', i18nKey: 'nav.voice', icon: AudioLines },
   { to: '/canvas', i18nKey: 'nav.canvas', icon: Layers },
   { to: '/recordings', i18nKey: 'nav.recordings', icon: Video },
+  { to: '/activity', i18nKey: 'nav.activity', icon: Activity },
   { to: '/audit', i18nKey: 'nav.audit', icon: Shield },
   { to: '/settings', i18nKey: 'nav.settings', icon: Settings },
 ];

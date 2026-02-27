@@ -39,20 +39,16 @@ services:
     # This gives the AI full control of the VPS (install packages, run services, etc.)
     pid: "host"
     privileged: true
+    # Host networking: container shares the host's network stack directly.
+    # ANY port the agent opens (Node.js, Python, etc.) is immediately accessible on the VPS IP.
+    # No port mapping needed — the container IS the host network.
+    network_mode: "host"
     depends_on:
       mysql:
         condition: service_healthy
-    ports:
-      - "${GATEWAY_PORT:-18800}:18800"
-      # Dynamic app ports — agent can start Node.js/Python/etc servers on these
-      - "3001:3001"
-      - "3002:3002"
-      - "3003:3003"
-      - "3004:3004"
-      - "3005:3005"
     environment:
-      # Database
-      MYSQL_HOST: mysql
+      # Database (127.0.0.1 because host networking can't resolve Docker service names)
+      MYSQL_HOST: 127.0.0.1
       MYSQL_PORT: 3306
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-forgeai_secret}

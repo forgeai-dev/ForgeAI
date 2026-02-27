@@ -4,13 +4,28 @@ import { createAuditLogger, type AuditLogger } from '@forgeai/security';
 
 const logger = createLogger('Tool:Registry');
 
+export type ActivityCallback = (event: {
+  toolName: string;
+  params: Record<string, unknown>;
+  success: boolean;
+  blocked: boolean;
+  duration: number;
+  userId?: string;
+  error?: string;
+}) => void;
+
 export class ToolRegistry {
   private tools: Map<string, BaseTool> = new Map();
   private auditLogger: AuditLogger;
   private blockedTools: Set<string> = new Set();
+  private activityCallback: ActivityCallback | null = null;
 
   constructor(auditLogger?: AuditLogger) {
     this.auditLogger = auditLogger ?? createAuditLogger();
+  }
+
+  onActivity(cb: ActivityCallback): void {
+    this.activityCallback = cb;
   }
 
   register(tool: BaseTool): void {
@@ -78,6 +93,9 @@ export class ToolRegistry {
         success: false,
         riskLevel: 'high',
       });
+      this.activityCallback?.({
+        toolName: name, params, success: false, blocked: true, duration: 0, userId,
+      });
       return { success: false, error: `Tool ${name} is currently blocked`, duration: 0 };
     }
 
@@ -102,6 +120,11 @@ export class ToolRegistry {
         success: result.success,
       });
 
+      this.activityCallback?.({
+        toolName: name, params, success: result.success, blocked: false,
+        duration: result.duration, userId,
+      });
+
       return result;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -113,6 +136,11 @@ export class ToolRegistry {
         details: { tool: name, error: errorMsg },
         success: false,
         riskLevel: 'medium',
+      });
+
+      this.activityCallback?.({
+        toolName: name, params, success: false, blocked: false,
+        duration: 0, userId, error: errorMsg,
       });
 
       return { success: false, error: errorMsg, duration: 0 };

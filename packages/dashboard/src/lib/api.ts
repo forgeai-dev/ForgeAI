@@ -210,6 +210,23 @@ export const api = {
   // Active sessions (progress recovery)
   getActiveSessions: () =>
     request<{ active: Array<{ agentId: string; sessionId: string; status: string; iteration: number; maxIterations: number; currentTool?: string; steps: AgentStep[]; startedAt: number }> }>('/api/chat/active'),
+  // Activity Monitoring
+  getActivity: (opts?: { type?: string; target?: string; riskLevel?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.type) params.set('type', opts.type);
+    if (opts?.target) params.set('target', opts.target);
+    if (opts?.riskLevel) params.set('riskLevel', opts.riskLevel);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.offset) params.set('offset', String(opts.offset));
+    const qs = params.toString();
+    return request<{ activities: Array<{
+      id: number; timestamp: string; type: string; toolName: string; target: string;
+      command?: string; summary: string; riskLevel: string; success: boolean;
+      durationMs?: number; sessionId?: string; userId?: string;
+    }> }>(`/api/activity${qs ? `?${qs}` : ''}`);
+  },
+  getActivityStats: () =>
+    request<{ stats: { totalToday: number; hostToday: number; blockedToday: number; errorToday: number } }>('/api/activity/stats'),
   // Workspace Prompts
   getWorkspacePrompts: () => request<{ files: WorkspacePromptFile[] }>('/api/workspace/prompts'),
   getWorkspacePrompt: (filename: string) => request<{ filename: string; content: string }>(`/api/workspace/prompts/${encodeURIComponent(filename)}`),

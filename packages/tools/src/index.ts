@@ -2,6 +2,7 @@ export { BaseTool } from './base.js';
 export type { ToolParameter, ToolDefinition, ToolResult } from './base.js';
 
 export { ToolRegistry, createToolRegistry } from './registry.js';
+export type { ActivityCallback } from './registry.js';
 
 export { WebBrowserTool } from './tools/web-browser.js';
 export { FileManagerTool } from './tools/file-manager.js';
