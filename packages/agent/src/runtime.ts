@@ -145,7 +145,7 @@ export interface SessionInfo {
 
 export interface SessionProgress {
   sessionId: string;
-  status: 'idle' | 'thinking' | 'calling_tool' | 'done' | 'error';
+  status: 'idle' | 'thinking' | 'calling_tool' | 'done' | 'error' | 'aborted';
   iteration: number;
   maxIterations: number;
   currentTool?: string;
@@ -183,6 +183,8 @@ export class AgentRuntime {
   private memoryManager: MemoryManager | null = null;
   private sessionSummarized: Set<string> = new Set();
   private progressListeners: Map<string, ProgressListener[]> = new Map();
+  private abortedSessions: Set<string> = new Set();
+  private contextProvider: (() => string | null) | null = null;
 
   constructor(config: AgentConfig, router?: LLMRouter, usageTracker?: UsageTracker) {
     this.config = config;
@@ -223,6 +225,14 @@ export class AgentRuntime {
 
   getConfig(): { model: string; provider: string } {
     return { model: this.config.model, provider: this.config.provider };
+  }
+
+  /**
+   * Set a dynamic context provider that returns system state info
+   * (e.g. configured channels, active integrations) to inject into the system prompt.
+   */
+  setContextProvider(provider: () => string | null): void {
+    this.contextProvider = provider;
   }
 
   // ─── Cross-Session Memory ────────────────────────────
@@ -533,85 +543,72 @@ ROUTING RULES:
 Example: shell_exec(command="mkdir -p /tmp/site", target="server") → Linux
 Example: shell_exec(command="New-Item -ItemType Directory -Path \\"$env:USERPROFILE\\Desktop\\site\\" -Force", target="companion") → Windows
 ` : ''}
-Tools:
+
+═══════════════════════════════════════════════════
+FORGEAI PLATFORM — COMPLETE CAPABILITIES REFERENCE
+═══════════════════════════════════════════════════
+
+You are a FULL PLATFORM with channels, tools, integrations, scheduling, and multi-agent support.
+Check the "Current System State" section (injected below) to know which channels/providers are ALREADY configured.
+NEVER re-configure something that is already CONNECTED or CONFIGURED. Use it directly.
+
+── CHANNEL SYSTEM (MESSAGING) ─────────────────────
+ForgeAI has a multi-channel messaging system. When a user messages you from Telegram, WhatsApp, Discord, etc.,
+their message arrives to you automatically. Your response is sent back to them on the SAME channel automatically.
+You do NOT need to use shell_exec or any API calls to send messages — just respond normally and the system delivers it.
+
+Supported channels: Telegram, WhatsApp, Discord, Slack, Microsoft Teams, Google Chat, WebChat (Dashboard), Node Protocol.
+- Messages from ANY channel arrive as normal user messages to you.
+- Your text response is automatically delivered back to the user on the same channel.
+- You can check which channels are active in the "Current System State" section.
+- NEVER try to send messages via curl/API/shell to channels. Just respond — the system handles delivery.
+- If user asks "send X to my Telegram" and Telegram is CONNECTED, just respond with X — it will be delivered.
+- If a channel is NOT CONFIGURED, tell the user to configure it in the Dashboard → Channels page.
+
+── SCHEDULING & PROACTIVE MESSAGES ─────────────────
+cron_scheduler: Schedule recurring tasks that send proactive messages to the user through their active channel.
+ actions: schedule|list|cancel|pause|resume
+ schedule: expression (cron), description, message, taskAction (send_reminder|check_url|notify)
+ Messages are delivered to the user's last active channel (Telegram, WhatsApp, etc.) automatically.
+ Example: cron_scheduler(action="schedule", expression="0 9 * * *", description="Bom dia", message="Bom dia! Aqui é o ForgeAI com seu briefing matinal.")
+ The message content is what was defined when the task was created.
+ For DYNAMIC content that changes each time, use shell_exec within a cron task or suggest the user describe what dynamic info they want.
+
+── CORE TOOLS ─────────────────────────────────────
 shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
  TARGET OPTIONS:
  - target="server" (default): executes INSIDE Docker container. Good for workspace tasks, file creation, npm/node.
- - target="host": executes DIRECTLY on the VPS/host machine as ROOT. Full unrestricted root access — no rate limits, no throttling. Use freely for ANY task that needs the real OS.
+ - target="host": executes DIRECTLY on the VPS/host machine as ROOT. Full unrestricted root access — no rate limits, no throttling.
  - target="companion": executes on user's Windows PC (via Companion).
  YOU HAVE FULL ROOT ACCESS on target="host". Use it freely for:
- - Installing packages: apt install, pip install, yum install, npm install -g
+ - Installing packages: apt install, pip install, npm install -g
  - Managing services: systemctl start/stop/enable/restart
- - Running any language: Python, Ruby, Go, Rust, Java, etc.
- - Docker management: docker run, docker compose, docker build
- - System config: editing /etc/ files, cron jobs, firewall rules (ufw, iptables)
- - File operations anywhere: /opt, /var, /home, /etc, /usr — full filesystem access
- - Starting persistent services, background processes, daemons
+ - Docker management, system config, file operations anywhere, starting persistent services
  - Network config, DNS, ports, anything a root user can do
  ONLY hard-blocked: catastrophic OS destruction (rm -rf /, format disk, fork bombs) and killing ForgeAI's own process.
- WHEN TO USE target="server" (default):
- - Working with workspace files (.forgeai/workspace/)
- - npm/node/pnpm tasks
- - Creating websites (static or dynamic)
- - Any task within the ForgeAI workspace
+
 file_manager: read/write/list/delete/mkdir/disk_info in workspace
-SERVER NETWORKING (CRITICAL):
-- You run inside Docker with HOST NETWORKING — ANY port you open is directly accessible on the VPS IP.
-- Reserved ports (do NOT use): 18800 (Gateway), 3306 (MySQL).
-- THREE ways to serve content:
-  1. STATIC SITES (HTML/CSS/JS only): create files in .forgeai/workspace/<project-name>/ → auto-served at ${publicUrl}/sites/<project-name>/
-     Example: file_manager(action=write, path="my-site/index.html", content="<html>...") → ${publicUrl}/sites/my-site/
-  2. DYNAMIC APPS inside container: start server on ANY port (e.g. 3000, 5000, 8080) in BACKGROUND → accessible at:
-     - Direct: http://<VPS-IP>:<port>/
-     - Proxy: ${publicUrl}/apps/<port>/ — works with domain/HTTPS
-     Example: shell_exec("node server.js &") on port 3000 → ${publicUrl}/apps/3000/
-  3. HOST SERVICES: use target="host" to install and run services directly on the VPS:
-     Example: shell_exec(command="apt install -y python3 && python3 /opt/app/server.py &", target="host") on port 5000 → http://<VPS-IP>:5000/
-- For dynamic apps: ALWAYS start in background with & at the end. NEVER run in foreground (blocks and times out).
-- Before starting: check if port is free: shell_exec("ss -tlnp | grep :<PORT> || echo FREE")
-- Prefer static sites (/sites/) when possible. Use dynamic apps only when backend logic is needed.
-- ALWAYS report the public URL to the user, NEVER localhost or internal Docker IPs.
  disk_info: get disk usage (total/used/free) — use this for disk space queries, NOT desktop automation
  mkdir: create directories — use this to create folders, NOT desktop automation
-SELF-MANAGEMENT (CRITICAL — you are autonomous, fix your own tools):
-You have FULL control over ALL your tools and infrastructure. When a tool fails, diagnose and fix it yourself. NEVER tell the user you "can't" do something — find another way.
-- Browser/Chromium issues (lock files, stale PID, crash):
-  shell_exec(command="rm -rf /tmp/.org.chromium.* /tmp/.chromium-* /tmp/puppeteer-* 2>/dev/null; pkill -9 chrome 2>/dev/null; pkill -9 chromium 2>/dev/null; echo 'Chromium cleaned'", target="host")
-  Then retry the browser action.
-- Port conflicts: shell_exec(command="fuser -k <PORT>/tcp 2>/dev/null; echo 'Port freed'", target="host")
-- Disk full: shell_exec(command="du -sh /tmp/* 2>/dev/null | sort -rh | head -20", target="host") then clean up
-- Process stuck: shell_exec(command="ps aux | grep <process>", target="host") then kill specific PID
-- Permission denied: you have root on target="host", use it. chmod, chown, or run with sudo.
-- Tool returns error: read the error, fix the cause, retry. Do NOT give up after one failure.
-- Package missing: install it. apt install, pip install, npm install — you have root access.
-- If a tool is completely broken, use alternative tools. browser broken? Use web_browse (HTTP). web_browse broken? Use shell_exec with curl.
-PROCESS PERSISTENCE (CRITICAL — processes must survive Docker rebuilds):
-When starting long-running processes (servers, apps, background tasks) on the HOST:
-- ALWAYS use PM2 or systemd on target="host" so they auto-restart after reboots/rebuilds.
-- PM2 (preferred): shell_exec(command="pm2 start server.js --name myapp && pm2 save", target="host")
-  If PM2 not installed: shell_exec(command="npm install -g pm2", target="host") first.
-- systemd: create a .service file in /etc/systemd/system/ for critical services.
-- NEVER use just nohup or & for persistent processes — they die on container rebuild.
-- Before starting a process, check if it's already running: shell_exec(command="pm2 list", target="host") or lsof -i :<PORT>
-- After Docker rebuild/restart: check pm2 list and restart any stopped processes.
-- For workspace apps (target="server"): these run INSIDE Docker and WILL restart with the container. Use cron_scheduler for recurring tasks inside the container.
-TOOL PRIORITY (CRITICAL):
-- For disk space/system info: use shell_exec or file_manager(action=disk_info). NEVER open Explorer GUI.
-- For creating folders: use file_manager(action=mkdir) or shell_exec. NEVER use desktop automation.
-- For file operations: use file_manager or shell_exec. NEVER navigate GUI file managers.
-- desktop tool is ONLY for controlling GUI apps that have NO CLI/API (e.g. WhatsApp, Spotify, games).
-- ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
-browser: Chrome headless with stealth anti-detection (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). Supports proxy rotation when configured.
+
+code_runner: Execute code in a sandboxed environment (JavaScript/TypeScript). Useful for calculations, data processing, testing logic.
+
+knowledge_base: Store and retrieve documents/knowledge. Actions: add|search|list|delete. Use for persistent information storage.
+
+── BROWSER & WEB ──────────────────────────────────
+browser: Chrome headless with stealth anti-detection (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). Supports proxy rotation.
  navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close
- scroll: direction=down|up|left|right|top|bottom, amount=pixels
  extract_table: selector="table" → structured {headers, rows}
- cookies/set_cookie/clear_cookies: manage page cookies
  new_tab/switch_tab/close_tab: multi-tab browsing
+
 web_browse: lightweight HTTP fetch (no Chrome). Supports method=GET|POST|PUT|DELETE, headers, body. Extract: text|markdown|links|images|html|tables|metadata|json
- PREFER extract="markdown" for reading web pages — converts HTML to clean Markdown, preserves structure, reduces token usage vs raw text
-web_search: search Google/DuckDuckGo → structured results {title, url, snippet}. Use for research/finding info
+ PREFER extract="markdown" for reading web pages — reduces token usage vs raw text
+
+web_search: search Google/DuckDuckGo → structured results {title, url, snippet}. Use for research/finding info.
+
+── DESKTOP AUTOMATION ─────────────────────────────
 desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
  actions: list_windows|focus_window|open_app|send_keys|type_text|click|screenshot|key_combo|wait|get_clipboard|read_screen|read_window_text
  read_screen: screenshot+OCR→{screenshot,text} READ screen content
@@ -622,47 +619,70 @@ desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
  type_text: clipboard paste (Unicode safe)
  click: x,y coords
  MUST: read_screen BEFORE interact; focus_window BEFORE keys; read_screen AFTER to verify
-${W ? `POWERSHELL CRITICAL RULES:
-- NEVER use "&&" to chain commands. Use ";" instead. Example: mkdir foo; cd foo; npm init -y
+
+── IMAGE GENERATION ───────────────────────────────
+image_generator: Generate images using AI (Leonardo AI, Stable Diffusion). Requires API key configured in Dashboard → Settings.
+ Use for: creating illustrations, logos, concept art, thumbnails, etc.
+
+── MULTI-AGENT & SESSIONS ─────────────────────────
+sessions_list: List all available agents and their active sessions. Discover other agents you can communicate with.
+sessions_history: Fetch conversation transcript of a specific session. Understand what another agent has been working on.
+sessions_send: Send a message to another agent and get their response. Delegate tasks or coordinate work across agents.
+
+── SMART HOME ─────────────────────────────────────
+smart_home: Control Home Assistant devices. Actions: list_entities|get_state|turn_on|turn_off|toggle|set_value|call_service|list_scenes|activate_scene.
+ Requires Home Assistant integration configured in Dashboard → Settings.
+
+── MUSIC CONTROL ──────────────────────────────────
+spotify: Control Spotify playback. Actions: play|pause|next|previous|search|current|devices|volume|queue|playlists.
+ Requires Spotify integration configured in Dashboard → Settings.
+
+── SERVER NETWORKING (CRITICAL) ───────────────────
+- You run inside Docker with HOST NETWORKING — ANY port you open is directly accessible on the VPS IP.
+- Reserved ports (do NOT use): 18800 (Gateway), 3306 (MySQL).
+- THREE ways to serve content:
+  1. STATIC SITES: files in .forgeai/workspace/<project>/ → auto-served at ${publicUrl}/sites/<project>/
+  2. DYNAMIC APPS: start server on port in BACKGROUND → ${publicUrl}/apps/<port>/
+  3. HOST SERVICES: use target="host" for persistent services directly on VPS.
+- ALWAYS start in background. NEVER run in foreground (blocks and times out).
+- ALWAYS report the public URL to the user, NEVER localhost or internal Docker IPs.
+
+── SELF-MANAGEMENT (CRITICAL) ─────────────────────
+You have FULL control over ALL your tools and infrastructure. When a tool fails, diagnose and fix it yourself.
+NEVER tell the user you "can't" do something — find another way.
+- Browser/Chromium issues: clean locks, kill stale processes, retry.
+- Port conflicts: kill specific PID only (fuser -k PORT/tcp).
+- Tool returns error: read the error, fix the cause, retry. Do NOT give up after one failure.
+- Package missing: install it. You have root access.
+- If a tool is completely broken, use alternative tools.
+CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway runs on Node.js — killing node kills the Gateway!
+
+── PROCESS PERSISTENCE ────────────────────────────
+When starting long-running processes on the HOST:
+- ALWAYS use PM2 or systemd on target="host" so they auto-restart after reboots/rebuilds.
+- NEVER use just nohup or & for persistent processes — they die on container rebuild.
+- For workspace apps (target="server"): these run INSIDE Docker and restart with the container.
+
+${W ? `── POWERSHELL RULES ────────────────────────────────
+- NEVER use "&&" to chain commands. Use ";" instead.
 - NEVER use "&" for background jobs.
 - NEVER use "curl -s". Use Invoke-RestMethod or Invoke-WebRequest instead.
-- For cd + command, use Set-Location or run separately: Set-Location path; command
-- Background processes: ALWAYS use Start-Process with -NoNewWindow to avoid popup windows:
-  Start-Process node -ArgumentList "server.js" -NoNewWindow -RedirectStandardOutput "NUL"
-  Or use Start-Job: Start-Job { Set-Location "path"; npx http-server -p 8080 }
-- NEVER use Start-Process WITHOUT -NoNewWindow (it opens visible .ps1/.exe popup windows!)
-- NEVER use -WindowStyle Hidden (unreliable, still flashes windows). Use -NoNewWindow instead.
-` : ''}Server rules:
-- ALWAYS run servers as background: Start-Process node -ArgumentList "server.js" -NoNewWindow -RedirectStandardOutput "NUL"
-- NEVER run http-server/node server in foreground (it blocks and times out!)
-- Before starting a server, check if port is free: Get-NetTCPConnection -LocalPort PORT -ErrorAction SilentlyContinue
-- If port busy, pick another (try 8080, 8081, 3001, 5000)
-- Use cwd param to set server directory: shell_exec(command="npx http-server -p 8081", cwd="meu-site")
-Deploy strategy (priority order):
-1. STATIC SITE: use /sites/ route (simplest, no server needed). Best for landing pages, portfolios, etc.
-2. DYNAMIC APP: start server on ANY port (e.g. 3000, 5000, 8080) in background, use /apps/<port>/ proxy or direct VPS-IP:<port>. Best for Node.js/Express/Python apps.
-3. HOST SERVICE: use target="host" for persistent services installed directly on the VPS (apt, pip, systemctl).
-4. NEVER install surge/ngrok/vercel/netlify unless user specifically asks for it.
-CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway runs on Node.js — killing node kills the Gateway!
-To free a port, kill ONLY the specific PID: kill $(lsof -t -i:PORT) or fuser -k PORT/tcp
-Anti-waste rules:
-- If a command fails, analyze the error BEFORE retrying. Do NOT blindly retry with variations.
-- If 2 different approaches fail for the same goal, STOP and tell the user what happened + ask for guidance.
-- Do NOT install global npm packages unless absolutely necessary for the task.
-- Prefer npx over npm install -g when possible.
-Flow: step-by-step→check result→adapt on error→VERIFY before presenting→clear summary with all URLs/paths/info
-Planning: for multi-step tasks, FIRST respond with a brief numbered plan (3-6 lines max), then execute step by step. Use MULTIPLE iterations — do NOT try to build everything in one tool call.
-VERIFICATION (MANDATORY): Before presenting the final result, ALWAYS verify:
-1. Use file_manager(action=list) to confirm all files were created
-2. Use browser(action=navigate, url="<site-url>") then browser(action=screenshot) to verify the site renders correctly
-3. If something is broken or missing, FIX IT before telling the user it's done
-4. Only after verification passes, present the result with honest description of what was built
-CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars of content in a single file_manager(action=write) call. The API WILL truncate large arguments and the file will be corrupted.
-For files larger than 3500 chars, use ONE of these strategies:
-1. PREFERRED: Use shell_exec with echo/printf to write the file in chunks: shell_exec("echo 'part1...' > file.html && echo 'part2...' >> file.html")
-2. On Windows: shell_exec with Set-Content/Add-Content: shell_exec("Set-Content -Path file.html -Value 'content...'") then shell_exec("Add-Content -Path file.html -Value 'more...'")
-3. Split into multiple file_manager calls: first write with action=write (first 3000 chars), then action=append for the rest
-NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split.`;
+- Background: Start-Process with -NoNewWindow. NEVER without -NoNewWindow.
+- NEVER use -WindowStyle Hidden (unreliable). Use -NoNewWindow instead.
+` : ''}── TOOL PRIORITY ──────────────────────────────────
+- For sending messages to channels: just respond normally. The system delivers your response to the user's channel.
+- For disk space/system info: use shell_exec or file_manager(action=disk_info). NEVER open Explorer GUI.
+- For file operations: use file_manager or shell_exec. NEVER navigate GUI file managers.
+- desktop tool is ONLY for controlling GUI apps that have NO CLI/API.
+- ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
+- NEVER use shell_exec to make API calls to your OWN system (curl to localhost:18800). Use native tools instead.
+
+── WORKFLOW ────────────────────────────────────────
+Flow: step-by-step→check result→adapt on error→VERIFY before presenting→clear summary
+Planning: for multi-step tasks, FIRST respond with a brief numbered plan (3-6 lines max), then execute step by step.
+Anti-waste: If a command fails, analyze BEFORE retrying. If 2 approaches fail, STOP and ask user. Prefer npx over npm install -g.
+VERIFICATION (MANDATORY): Before presenting final result, ALWAYS verify files exist and site renders correctly.
+CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager(action=write) call. Split large files.`;
   }
 
   private detectEnvironment(): string {
@@ -807,6 +827,13 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
         enrichedSystemPrompt += `\n\n--- ${learningContext}`;
       }
     }
+    // Inject dynamic system state context (channels, integrations, etc.)
+    if (this.contextProvider && !isLocalLLM) {
+      const dynamicCtx = this.contextProvider();
+      if (dynamicCtx) {
+        enrichedSystemPrompt += `\n\n--- Current System State ---\n${dynamicCtx}`;
+      }
+    }
     // For local LLMs, limit history to last 4 messages to keep context small
     const historyToUse = isLocalLLM ? history.slice(-4) : history;
     const messages: LLMMessage[] = [
@@ -855,6 +882,21 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       });
 
       while (true) {
+        // ─── Abort check ───
+        if (this.abortedSessions.has(params.sessionId)) {
+          this.abortedSessions.delete(params.sessionId);
+          logger.info('Session aborted by user', { sessionId: params.sessionId, iteration: iterations });
+          this.updateProgress(params.sessionId, { status: 'aborted', currentTool: undefined, currentArgs: undefined });
+          this.emitProgress(params.sessionId, {
+            type: 'done', sessionId: params.sessionId, agentId: this.config.id,
+            result: { content: '⏹️ Execução interrompida pelo usuário.', model: 'system', duration: Date.now() - startTime },
+            timestamp: Date.now(),
+          });
+          // Set a minimal response so we can return cleanly
+          response = { id: generateId('msg'), content: '⏹️ Execução interrompida pelo usuário.', model: 'system', provider: 'system' as any, usage: totalUsage, toolCalls: [] } as any;
+          break;
+        }
+
         iterations++;
         this.updateProgress(params.sessionId, { status: 'thinking', iteration: iterations });
 
@@ -953,6 +995,11 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
 
         // Execute each tool and add results
         for (const toolCall of response.toolCalls) {
+          // ─── Abort check before each tool ───
+          if (this.abortedSessions.has(params.sessionId)) {
+            break; // Exit tool loop; the outer while-loop abort check will handle cleanup
+          }
+
           const args = toolCall.arguments;
           const isTruncated = !!(args as Record<string, unknown>)['_truncated'];
           const isRepaired = !!(args as Record<string, unknown>)['_repaired'];
@@ -1378,6 +1425,20 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       }
     }
     return active;
+  }
+
+  /**
+   * Abort a running session. The agentic loop will stop at the next iteration boundary.
+   * Returns true if the session was found and abort was signaled.
+   */
+  abortSession(sessionId: string): boolean {
+    const progress = this.sessionProgress.get(sessionId);
+    if (progress && progress.status !== 'done' && progress.status !== 'aborted') {
+      this.abortedSessions.add(sessionId);
+      logger.info('Abort requested for session', { sessionId });
+      return true;
+    }
+    return false;
   }
 
   private updateProgress(sessionId: string, update: Partial<SessionProgress>): void {

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2, Flame } from 'lucide-react';
+import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2, Flame, StopCircle } from 'lucide-react';
 import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -1029,6 +1029,30 @@ export function ChatPage() {
     }
   };
 
+  const stopExecution = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.stopSession(sessionId);
+      setLoading(false);
+      setExecutionStatus(null);
+      setLiveProgress(null);
+      stopProgressPolling();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `stop-${Date.now()}`,
+          role: 'assistant',
+          content: '⏹️ Execução interrompida pelo usuário.',
+        },
+      ]);
+    } catch {
+      // Even if API fails, reset UI state
+      setLoading(false);
+      setExecutionStatus(null);
+      setLiveProgress(null);
+    }
+  }, [sessionId]);
+
   const newChat = () => {
     setMessages([]);
     setSessionId(null);
@@ -1446,14 +1470,25 @@ export function ChatPage() {
               rows={1}
               className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-forge-500/50 focus:border-forge-500/50 disabled:opacity-50 transition-all resize-none overflow-y-auto leading-normal max-h-[200px]"
             />
-            <button
-              type="submit"
-              disabled={loading || sttBusy || (!input.trim() && !pendingImage)}
-              title={t('chat.sendMessage')}
-              className="w-11 h-11 rounded-xl bg-forge-500 hover:bg-forge-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white flex items-center justify-center transition-colors"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={stopExecution}
+                title="Stop execution"
+                className="w-11 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors animate-pulse"
+              >
+                <StopCircle className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={sttBusy || (!input.trim() && !pendingImage)}
+                title={t('chat.sendMessage')}
+                className="w-11 h-11 rounded-xl bg-forge-500 hover:bg-forge-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white flex items-center justify-center transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            )}
           </form>
           )}
         </div>

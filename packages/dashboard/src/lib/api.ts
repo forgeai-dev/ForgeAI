@@ -172,6 +172,8 @@ export const api = {
     request<{ success: boolean }>(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' }),
   deleteAllSessions: () =>
     request<{ success: boolean; deleted: number }>('/api/chat/sessions', { method: 'DELETE' }),
+  stopSession: (sessionId: string) =>
+    request<{ success: boolean; sessionId: string }>('/api/chat/stop', { method: 'POST', body: JSON.stringify({ sessionId }) }),
   // Multi-agent
   getAgents: () => request<{ agents: AgentInfo[]; bindings: unknown[] }>('/api/agents'),
   addAgent: (agent: { id: string; name: string; model?: string; provider?: string; persona?: string }) =>

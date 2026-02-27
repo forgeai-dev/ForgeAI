@@ -25,14 +25,14 @@ export class CronSchedulerTool extends BaseTool {
 
   readonly definition: ToolDefinition = {
     name: 'cron_scheduler',
-    description: 'Schedule, list, and manage recurring tasks using cron expressions. Scheduled tasks will be delivered as proactive messages to the user through their active channel (Telegram, Discord, WhatsApp, WebChat, etc.). Use this for reminders, periodic checks, and automated notifications. The message will be sent directly to the user who created the task.',
+    description: 'Schedule, list, and manage recurring tasks using cron expressions. Scheduled tasks will be delivered as proactive messages to the user through their active channel (Telegram, Discord, WhatsApp, WebChat, etc.). Use this for reminders, periodic checks, and automated notifications. The message will be sent directly to the user who created the task. For DYNAMIC content that changes each time (e.g. weather, news briefing, system status), use taskAction="agent_prompt" — this triggers the full agent with tools to process the message as a prompt and deliver the dynamic result.',
     category: 'scheduler',
     dangerous: true,
     parameters: [
       { name: 'action', type: 'string', description: 'Action: "schedule", "list", "cancel", "pause", "resume"', required: true },
       { name: 'expression', type: 'string', description: 'Cron expression (e.g. "*/5 * * * *" = every 5 min, "30 9 * * *" = daily at 9:30)', required: false },
       { name: 'description', type: 'string', description: 'Human-readable task description', required: false },
-      { name: 'taskAction', type: 'string', description: 'What the task should do: "send_reminder", "check_url", "notify", etc.', required: false },
+      { name: 'taskAction', type: 'string', description: 'What the task should do: "send_reminder" (static message), "agent_prompt" (dynamic — agent processes the message with tools each time and delivers the result), "check_url", "notify"', required: false },
       { name: 'message', type: 'string', description: 'Message content to deliver when the task fires (for reminders)', required: false },
       { name: 'taskParams', type: 'object', description: 'Additional parameters for the task action', required: false },
       { name: 'taskId', type: 'string', description: 'Task ID (for cancel/pause/resume)', required: false },

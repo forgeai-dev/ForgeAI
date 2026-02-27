@@ -128,6 +128,9 @@ export function handleChatCommand(
     case '/pair':
       return cmdPair(args, options);
 
+    case '/stop':
+      return cmdStop(sessionId, agentManager);
+
     default:
       return { handled: false };
   }
@@ -673,6 +676,35 @@ function cmdPair(
   };
 }
 
+// ─── /stop ────────────────────────────
+function cmdStop(sessionId: string, agentManager: AgentManager): CommandResult {
+  const aborted = agentManager.abortSession(sessionId);
+  if (aborted) {
+    logger.info('Agent execution stopped via /stop command', { sessionId });
+    return {
+      handled: true,
+      response: [
+        '⏹️  Execucao parada!',
+        '',
+        '🛑  O agente foi interrompido.',
+        '     A resposta parcial foi descartada.',
+        '',
+        '💡  Mande qualquer mensagem para',
+        '     continuar normalmente.',
+      ].join('\n'),
+    };
+  }
+  return {
+    handled: true,
+    response: [
+      '✅  Nenhuma execucao ativa',
+      '',
+      '     O agente nao esta processando',
+      '     nada nesta sessao agora.',
+    ].join('\n'),
+  };
+}
+
 // ─── /help ────────────────────────────
 function cmdHelp(): CommandResult {
   return {
@@ -684,6 +716,7 @@ function cmdHelp(): CommandResult {
       '',
       '── Conversa ────────────────',
       '  /new      Comecar conversa do zero',
+      '  /stop     Parar execucao do agente',
       '  /compact  Limpar historico antigo',
       '            (economiza tokens)',
       '',

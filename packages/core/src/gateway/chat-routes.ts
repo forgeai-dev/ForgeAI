@@ -391,71 +391,88 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // Wire CronSchedulerTool callback for proactive message delivery
   const cronTool = toolRegistry.get('cron_scheduler') as CronSchedulerTool | undefined;
   if (cronTool) {
-    cronTool.setCallback(async (task) => {
-      const userId = task.params['__userId'] as string | undefined;
-      const message = task.params['message'] as string || task.description;
-      const deliveryContent = `🔔 **Lembrete** [${task.description}]\n\n${message}`;
-
-      logger.info('Cron task fired, delivering proactive message', {
-        taskId: task.id, description: task.description, userId, action: task.action,
-      });
-
+    // Helper: deliver content to user's active channel
+    const deliverToChannel = async (content: string, userId?: string): Promise<boolean> => {
       let delivered = false;
 
-      // Try to deliver to user's last active channel
       if (userId) {
         const target = userChannelMap.get(userId);
         if (target) {
           try {
             if (target.channelType === 'telegram' && telegramChannel?.isConnected()) {
-              await telegramChannel.send({
-                channelType: 'telegram',
-                recipientId: target.chatId,
-                content: deliveryContent,
-              });
+              await telegramChannel.send({ channelType: 'telegram', recipientId: target.chatId, content });
               delivered = true;
-              logger.info('Cron delivered via Telegram', { taskId: task.id, chatId: target.chatId });
             } else if (target.channelType === 'whatsapp' && whatsAppChannel?.isConnected()) {
-              await whatsAppChannel.send({
-                channelType: 'whatsapp',
-                recipientId: target.chatId,
-                content: deliveryContent,
-              });
+              await whatsAppChannel.send({ channelType: 'whatsapp', recipientId: target.chatId, content });
               delivered = true;
-              logger.info('Cron delivered via WhatsApp', { taskId: task.id, chatId: target.chatId });
             }
           } catch (err) {
-            logger.error('Cron channel delivery failed', err, { taskId: task.id });
+            logger.error('Cron channel delivery failed', err);
           }
         }
       }
 
-      // Fallback: deliver to Telegram admin if no user target found
+      // Fallback: deliver to Telegram admin
       if (!delivered && telegramChannel?.isConnected()) {
         try {
           const tgPerms = telegramChannel.getPermissions();
           const adminId = tgPerms.adminUsers[0];
           if (adminId && adminId !== '*') {
-            await telegramChannel.send({
-              channelType: 'telegram',
-              recipientId: adminId,
-              content: deliveryContent,
-            });
+            await telegramChannel.send({ channelType: 'telegram', recipientId: adminId, content });
             delivered = true;
-            logger.info('Cron delivered to Telegram admin (fallback)', { taskId: task.id, adminId });
           }
         } catch (err) {
-          logger.error('Cron admin fallback delivery failed', err, { taskId: task.id });
+          logger.error('Cron admin fallback delivery failed', err);
         }
       }
 
-      // Broadcast to dashboard WebSocket as well
+      return delivered;
+    };
+
+    cronTool.setCallback(async (task) => {
+      const userId = task.params['__userId'] as string | undefined;
+      const message = task.params['message'] as string || task.description;
+
+      logger.info('Cron task fired', {
+        taskId: task.id, description: task.description, userId, action: task.action,
+      });
+
+      let deliveryContent: string;
+      let delivered = false;
+
+      // ─── Dynamic cron: agent_prompt triggers the agent to process a prompt with tools ───
+      if (task.action === 'agent_prompt' && agentManager) {
+        try {
+          const sessionId = `cron-${task.id}-${Date.now()}`;
+          const prompt = message || task.description;
+          logger.info('Cron agent_prompt: triggering agent', { taskId: task.id, prompt: prompt.substring(0, 100) });
+
+          const result = await agentManager.processMessage({
+            sessionId,
+            userId: userId || 'cron-system',
+            content: `[Scheduled Task: ${task.description}] ${prompt}`,
+            channelType: 'cron',
+          });
+
+          deliveryContent = result.content || `🔔 [${task.description}] Tarefa concluída sem resposta textual.`;
+        } catch (err) {
+          logger.error('Cron agent_prompt failed', err, { taskId: task.id });
+          deliveryContent = `🔔 **Lembrete** [${task.description}]\n\n⚠️ Erro ao processar tarefa dinâmica. Mensagem original:\n${message}`;
+        }
+      } else {
+        // Static cron: just deliver the message as-is
+        deliveryContent = `🔔 **Lembrete** [${task.description}]\n\n${message}`;
+      }
+
+      delivered = await deliverToChannel(deliveryContent, userId);
+
+      // Broadcast to dashboard WebSocket
       const wsBroadcaster = getWSBroadcaster();
       wsBroadcaster.broadcastAll({
         type: 'cron.task_fired',
         taskId: task.id,
         description: task.description,
-        message,
+        message: deliveryContent.substring(0, 500),
         delivered,
         timestamp: new Date().toISOString(),
       });
@@ -464,7 +481,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         logger.warn('Cron task fired but could not deliver to any channel', { taskId: task.id });
       }
     });
-    logger.info('CronSchedulerTool callback wired for proactive delivery');
+    logger.info('CronSchedulerTool callback wired for proactive delivery (static + dynamic agent_prompt)');
   }
 
   logger.info(`Tool registry initialized: ${toolRegistry.size} tools registered (attached to ${agentManager.size} agents)`);
@@ -1266,6 +1283,82 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { success: true };
   });
 
+  // ─── Dynamic Context Provider ────────────────────────────────
+  // Injects real-time system state (channels, integrations) into the agent's system prompt
+  // so the agent knows what's already configured and avoids redundant actions.
+  const defaultAgent = agentManager.getDefaultAgent();
+  if (defaultAgent) {
+    defaultAgent.setContextProvider(() => {
+      const lines: string[] = [];
+
+      // Channel status
+      const channelStatus: string[] = [];
+      if (telegramChannel?.isConnected()) channelStatus.push('Telegram: CONNECTED');
+      else if (process.env.TELEGRAM_BOT_TOKEN) channelStatus.push('Telegram: CONFIGURED (token set)');
+      else channelStatus.push('Telegram: NOT CONFIGURED');
+
+      if (whatsAppChannel?.isConnected()) channelStatus.push('WhatsApp: CONNECTED');
+      else channelStatus.push('WhatsApp: NOT CONFIGURED');
+
+      if (teamsChannel) channelStatus.push('Microsoft Teams: CONFIGURED');
+      else channelStatus.push('Microsoft Teams: NOT CONFIGURED');
+
+      if (googleChatChannel) channelStatus.push('Google Chat: CONFIGURED');
+      else channelStatus.push('Google Chat: NOT CONFIGURED');
+
+      if (process.env.DISCORD_BOT_TOKEN) channelStatus.push('Discord: CONFIGURED (token set)');
+      else channelStatus.push('Discord: NOT CONFIGURED');
+
+      if (process.env.SLACK_BOT_TOKEN) channelStatus.push('Slack: CONFIGURED (token set)');
+      else channelStatus.push('Slack: NOT CONFIGURED');
+
+      channelStatus.push('WebChat: ALWAYS ACTIVE');
+
+      if (nodeChannel) {
+        const nodes = nodeChannel.getConnectedNodes();
+        channelStatus.push(`Node Protocol: ACTIVE (${nodes.length} node(s) connected)`);
+      }
+
+      lines.push('Channels: ' + channelStatus.join('; '));
+
+      // LLM Providers
+      const providerNames = Array.from(router.getProviders().keys());
+      if (providerNames.length > 0) {
+        lines.push('LLM Providers available: ' + providerNames.join(', '));
+      }
+
+      // Voice
+      if (voiceEngine?.isEnabled()) {
+        lines.push('Voice Engine: ENABLED (STT + TTS)');
+      }
+
+      // Integrations
+      const integrations: string[] = [];
+      if (githubIntegration?.isConfigured()) integrations.push('GitHub: ACTIVE');
+      if (gmailIntegration?.isConfigured()) integrations.push('Gmail: ACTIVE');
+      if (calendarIntegration?.isConfigured()) integrations.push('Google Calendar: ACTIVE');
+      if (notionIntegration?.isConfigured()) integrations.push('Notion: ACTIVE');
+      if (homeAssistantIntegration?.isConfigured()) integrations.push('Home Assistant: ACTIVE');
+      if (spotifyIntegration?.isConfigured()) integrations.push('Spotify: ACTIVE');
+      if (rssFeedManager) integrations.push('RSS Feeds: AVAILABLE');
+      if (integrations.length > 0) {
+        lines.push('Integrations: ' + integrations.join('; '));
+      }
+
+      // Cron tasks
+      const cronTool = toolRegistry?.get('cron_scheduler') as any;
+      if (cronTool?.tasks?.size > 0) {
+        lines.push(`Active scheduled tasks: ${cronTool.tasks.size}`);
+      }
+
+      lines.push('IMPORTANT: Do NOT re-configure channels that are already CONNECTED or CONFIGURED. Use them directly. Only configure channels marked as NOT CONFIGURED if the user requests it.');
+      lines.push('IMPORTANT: When user asks you to send something to a channel (e.g. Telegram), just respond with that content — the system delivers it automatically. Do NOT use shell_exec/curl to call APIs.');
+
+      return lines.join('\n');
+    });
+    logger.info('Dynamic context provider attached to default agent');
+  }
+
   // ─── REST API: Chat ────────────────────────────────
 
   // POST /api/chat — send a message and get a response
@@ -1756,6 +1849,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   app.get('/api/chat/active', async () => {
     if (!agentManager) return { active: [] };
     return { active: agentManager.getActiveSessions() };
+  });
+
+  // POST /api/chat/stop — abort a running agent execution
+  app.post('/api/chat/stop', async (request: FastifyRequest) => {
+    const body = request.body as { sessionId?: string };
+    if (!body.sessionId) return { success: false, error: 'sessionId is required' };
+    if (!agentManager) return { success: false, error: 'Agent manager not ready' };
+    const aborted = agentManager.abortSession(body.sessionId);
+    if (aborted) {
+      logger.info('Agent execution stopped via API', { sessionId: body.sessionId });
+    }
+    return { success: aborted, sessionId: body.sessionId };
   });
 
   // GET /api/chat/sessions — list all persistent chat sessions

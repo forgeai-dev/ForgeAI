@@ -461,6 +461,16 @@ export class AgentManager {
   }
 
   /**
+   * Abort a running session in any agent.
+   */
+  abortSession(sessionId: string): boolean {
+    for (const runtime of this.agents.values()) {
+      if (runtime.abortSession(sessionId)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Build agent-specific system prompt.
    */
   private buildAgentPrompt(def: AgentDefinition): string | undefined {
