@@ -2462,7 +2462,25 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // ─── REST API: Activity Monitoring ─────────────────
 
-  app.get('/api/activity', async (request: FastifyRequest) => {
+  // Per-IP rate limiter for activity endpoints (30 req/min)
+  const activityRateMap = new Map<string, number[]>();
+  const ACTIVITY_RATE_LIMIT = 30;
+  const ACTIVITY_RATE_WINDOW = 60_000;
+  function checkActivityRate(ip: string, reply: FastifyReply): boolean {
+    const now = Date.now();
+    let timestamps = activityRateMap.get(ip);
+    if (!timestamps) { timestamps = []; activityRateMap.set(ip, timestamps); }
+    while (timestamps.length > 0 && timestamps[0]! < now - ACTIVITY_RATE_WINDOW) timestamps.shift();
+    if (timestamps.length >= ACTIVITY_RATE_LIMIT) {
+      reply.status(429).send({ error: 'Rate limit exceeded for activity endpoints' });
+      return false;
+    }
+    timestamps.push(now);
+    return true;
+  }
+
+  app.get('/api/activity', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkActivityRate(request.ip, reply)) return;
     if (!activityStore) return { activities: [], stats: null };
     const query = request.query as Record<string, string>;
     const activities = await activityStore.query({
@@ -2476,7 +2494,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { activities };
   });
 
-  app.get('/api/activity/stats', async () => {
+  app.get('/api/activity/stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkActivityRate(request.ip, reply)) return;
     if (!activityStore) return { stats: { totalToday: 0, hostToday: 0, blockedToday: 0, errorToday: 0 } };
     const stats = await activityStore.getStats();
     return { stats };
