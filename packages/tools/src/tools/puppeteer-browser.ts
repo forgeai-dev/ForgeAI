@@ -18,6 +18,11 @@ import {
   type ElementFingerprint,
   type CandidateElement,
 } from '../utils/element-fingerprint.js';
+import {
+  isCloudflareChallenge,
+  getCFCookieCache,
+  type CFCookie,
+} from '../utils/cf-bypass.js';
 
 // Local/private addresses are ALLOWED since the agent runs locally and needs to test local sites.
 // Only block dangerous non-HTTP protocols in isBlockedUrl().
@@ -310,10 +315,21 @@ export class PuppeteerBrowserTool extends BaseTool {
       await page.waitForSelector(waitFor, { timeout: 10_000 });
     }
 
+    // ─── Cloudflare Challenge Auto-Solve ──────────────────────
+    // After navigation, check if we landed on a CF challenge page.
+    // If so, wait for the challenge to resolve (our stealth evasions
+    // should handle the JS challenge automatically) and cache the cookie.
+    const cfResult = await this.handleCFChallenge(page, url);
+
     const title = await page.title();
     const currentUrl = page.url();
 
-    return { title, url: currentUrl, status: 'navigated' };
+    const result: Record<string, unknown> = { title, url: currentUrl, status: 'navigated' };
+    if (cfResult) {
+      result['cfBypassed'] = true;
+      result['cfDomain'] = cfResult.domain;
+    }
+    return result;
   }
 
   private async screenshotAction(page: Page, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -826,6 +842,114 @@ export class PuppeteerBrowserTool extends BaseTool {
       sessionStorageKeys: Object.keys(pageState.sessionStorage).length,
       formsCount: pageState.forms.length,
     };
+  }
+
+  // ─── Cloudflare Challenge Handler ─────────────────────────────────
+
+  private async handleCFChallenge(page: Page, url: string): Promise<CFCookie | null> {
+    try {
+      const html = await page.content();
+      const domain = new URL(url).hostname;
+
+      // Check if the current page is a CF challenge
+      if (!isCloudflareChallenge(html, 403, {})) {
+        // Also check for 503 pattern — page.content() doesn't give us status,
+        // so rely on HTML patterns only
+        const lowerHtml = html.toLowerCase();
+        const hasCFPatterns = [
+          'cf-browser-verification',
+          '_cf_chl_opt',
+          'cf_chl_prog',
+          'challenges.cloudflare.com',
+          'cdn-cgi/challenge-platform',
+        ].filter(p => lowerHtml.includes(p)).length;
+
+        if (hasCFPatterns < 1) return null;
+      }
+
+      this.logger.info('Cloudflare challenge detected in browser, waiting for auto-solve', { url, domain });
+
+      // Wait for the challenge to resolve — our stealth evasions should handle
+      // the JS challenge. We poll for cf_clearance cookie.
+      const maxWait = 30_000;
+      const pollInterval = 1_000;
+      let elapsed = 0;
+
+      while (elapsed < maxWait) {
+        await new Promise(r => setTimeout(r, pollInterval));
+        elapsed += pollInterval;
+
+        // Check for cf_clearance cookie
+        const cookies = await page.cookies();
+        const clearanceCookie = cookies.find(c => c.name === 'cf_clearance');
+
+        if (clearanceCookie) {
+          // Collect extra cookies for this domain
+          const extraCookies: Record<string, string> = {};
+          for (const c of cookies) {
+            if (c.name !== 'cf_clearance' && c.domain.includes(domain)) {
+              extraCookies[c.name] = c.value;
+            }
+          }
+
+          const cfCookie: CFCookie = {
+            cfClearance: clearanceCookie.value,
+            userAgent: this.stealthProfile.userAgent,
+            domain,
+            cachedAt: Date.now(),
+            expiresAt: Date.now() + 25 * 60 * 1000, // 25 min TTL
+            extraCookies,
+          };
+
+          // Cache cookie so web_browse (Cheerio) can reuse it
+          getCFCookieCache().set(domain, cfCookie);
+          this.logger.info('Cloudflare challenge solved in browser', { domain, elapsed });
+          return cfCookie;
+        }
+
+        // Check if page moved past the challenge
+        const currentHtml = await page.content();
+        const stillChallenge = [
+          'cf-browser-verification',
+          '_cf_chl_opt',
+          'cf_chl_prog',
+          'challenges.cloudflare.com',
+        ].some(p => currentHtml.toLowerCase().includes(p));
+
+        if (!stillChallenge && elapsed > 3_000) {
+          // Page loaded real content — check cookies one last time
+          const finalCookies = await page.cookies();
+          const finalClearance = finalCookies.find(c => c.name === 'cf_clearance');
+          if (finalClearance) {
+            const extraCookies: Record<string, string> = {};
+            for (const c of finalCookies) {
+              if (c.name !== 'cf_clearance' && c.domain.includes(domain)) {
+                extraCookies[c.name] = c.value;
+              }
+            }
+            const cfCookie: CFCookie = {
+              cfClearance: finalClearance.value,
+              userAgent: this.stealthProfile.userAgent,
+              domain,
+              cachedAt: Date.now(),
+              expiresAt: Date.now() + 25 * 60 * 1000,
+              extraCookies,
+            };
+            getCFCookieCache().set(domain, cfCookie);
+            this.logger.info('Cloudflare challenge resolved (page loaded)', { domain });
+            return cfCookie;
+          }
+          // Challenge cleared but no cookie — page loaded normally
+          break;
+        }
+      }
+
+      this.logger.warn('Cloudflare challenge wait timed out', { domain, elapsed });
+      return null;
+    } catch {
+      // Non-critical — don't break navigation
+      return null;
+    }
   }
 
   // ─── Adaptive Element Tracking ─────────────────────────────────────

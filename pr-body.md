@@ -1,6 +1,6 @@
 ## Description
 
-Subdomain system for agent-created sites and apps, managed via the Dashboard. Includes domain settings API, app registry, subdomain routing middleware, dashboard UI, agent-aware URL generation, and Caddy wildcard config. Also increases Docker shm_size to 8GB for Chromium stability.
+Built-in Cloudflare bypass mechanism for the agent's web browsing tools. Detects CF challenges in HTTP-only requests (web_browse/Cheerio), automatically falls back to Puppeteer to solve the challenge, caches the `cf_clearance` cookie, and reuses it for subsequent requests. No external services or Docker containers needed.
 
 ## Type of Change
 
@@ -13,40 +13,37 @@ Subdomain system for agent-created sites and apps, managed via the Dashboard. In
 
 ## Changes Made
 
-### 1. Domain Settings API (Vault-persisted)
-- `packages/core/src/gateway/chat-routes.ts`: GET/PUT/DELETE `/api/settings/domain` — stores domain & subdomains_enabled in Vault, returns DNS instructions and active sites/apps list
-- No `.env` changes needed — all config via Dashboard
+### 1. CF Bypass Utility (`cf-bypass.ts`)
+- `packages/tools/src/utils/cf-bypass.ts`: Core utility with:
+  - `isCloudflareChallenge()` — detects CF challenges via HTML patterns + response headers
+  - `CFCookieCache` — in-memory cache (domain → cf_clearance cookie, 25min TTL, max 200 entries)
+  - `solveCFChallenge()` — launches stealth Puppeteer, navigates to CF-protected URL, polls for cf_clearance cookie (up to 30s), caches result
+  - `buildCFHeaders()` — builds fetch headers with cached CF cookies for a domain
+  - `extractDomain()` — URL → hostname helper
 
-### 2. App Registry
-- `packages/core/src/gateway/chat-routes.ts`: In-memory `appRegistry` Map (name↔port), persisted to Vault. Endpoints: GET `/api/apps/registry`, POST `/api/apps/register`, DELETE `/api/apps/registry/:name`
-- `resolvePublicUrl()` and `getSiteUrl()` helper functions for domain-aware URL generation
+### 2. web-browser.ts (Cheerio) Integration
+- Before fetch: injects cached CF cookies (cookie + matching User-Agent) if available
+- After fetch: detects CF challenge on 403/503 responses using `isCloudflareChallenge()`
+- On CF detection: launches Puppeteer via `solveCFWithPuppeteer()`, retries the fetch with solved cookies
+- Response processing refactored into `processResponse()` method (supports `cfBypassed` flag)
+- Loop-prevention via `cfBypassAttempted` Set (per-domain, 60s cooldown)
 
-### 3. Subdomain Routing Middleware
-- `packages/core/src/gateway/server.ts`: `registerSubdomainRouting()` — Fastify `onRequest` hook reads Host header, extracts subdomain, routes to workspace static site or proxies to registered app port
+### 3. puppeteer-browser.ts Integration
+- After every `navigateAction`, calls `handleCFChallenge()` to check if page is a CF challenge
+- If challenge detected: polls for cf_clearance cookie (up to 30s), caches it via `getCFCookieCache()`
+- Cached cookies are automatically available for subsequent `web_browse` (Cheerio) requests
+- Returns `cfBypassed: true` and `cfDomain` in navigation result when bypass occurs
 
-### 4. Agent Runtime (Domain-Aware)
-- `packages/agent/src/runtime.ts`: Updated system prompt SERVER NETWORKING section with app registry instructions and subdomain URL patterns
-- `detectEnvironment()`: Now includes Apps URL, App Registry API endpoint in system state
-- Dynamic context provider: Injects domain config, subdomains status, registered apps with resolved URLs
-
-### 5. Dashboard UI — Domain & Sites Section
-- `packages/dashboard/src/pages/Settings.tsx`: New "Domain & Sites" section with domain input, save/delete, subdomains toggle, DNS instructions panel, active sites/apps list with links
-- `packages/dashboard/src/lib/api.ts`: Added `getDomainSettings`, `saveDomainSettings`, `deleteDomainSettings`, `getAppRegistry`, `registerApp`, `unregisterApp` API methods
-
-### 6. Caddyfile — Wildcard Subdomain Support
-- `Caddyfile`: Added `*.{$DOMAIN}` block with on-demand TLS for auto-cert per subdomain, proxying all to Gateway
-
-### 7. Docker shm_size
-- `docker-compose.yml`: `shm_size: '8gb'` for gateway container (Chromium stability)
+### 4. Package Exports
+- `packages/tools/src/index.ts`: Exports all CF bypass functions and types
 
 ## How to Test
 
 1. `pnpm -r build` — all packages compile cleanly
-2. `pnpm forge start --migrate`
-3. **Domain Settings**: Dashboard → Settings → Domain & Sites → set domain, toggle subdomains, verify DNS instructions appear
-4. **App Registry**: Agent creates app → registers via POST `/api/apps/register` → appears in settings list
-5. **Subdomain Routing**: With domain configured + subdomains enabled, access `appname.yourdomain.com` → routes to correct app
-6. **Agent Awareness**: Ask agent to create a site — it should report the correct URL pattern (subdomain if configured, path-based otherwise)
+2. **web_browse (Cheerio)**: Request a CF-protected site → should detect challenge, fall back to Puppeteer, solve it, and return content with `cfBypassed: true`
+3. **browser (Puppeteer)**: Navigate to a CF-protected site → should auto-wait for challenge resolution and cache the cookie
+4. **Cookie reuse**: After Puppeteer solves once, subsequent `web_browse` requests to the same domain should use cached cookies (no Puppeteer needed)
+5. **Cache expiry**: After 25 minutes, cached cookies expire and next request triggers a fresh solve
 
 ## Related Issue
 
@@ -69,10 +66,7 @@ N/A
 
 | File | Changes |
 |------|---------|
-| `packages/core/src/gateway/chat-routes.ts` | Domain settings API, app registry, resolvePublicUrl, getSiteUrl, dynamic context with domain info |
-| `packages/core/src/gateway/server.ts` | Subdomain routing middleware (registerSubdomainRouting) |
-| `packages/agent/src/runtime.ts` | System prompt networking section, detectEnvironment with app registry info |
-| `packages/dashboard/src/pages/Settings.tsx` | Domain & Sites UI section |
-| `packages/dashboard/src/lib/api.ts` | Domain/app-registry API methods |
-| `Caddyfile` | Wildcard subdomain block with on-demand TLS |
-| `docker-compose.yml` | shm_size: 8gb |
+| `packages/tools/src/utils/cf-bypass.ts` | **NEW** — CF detection, cookie cache, Puppeteer solver |
+| `packages/tools/src/tools/web-browser.ts` | CF detection + auto-fallback to Puppeteer, processResponse refactor |
+| `packages/tools/src/tools/puppeteer-browser.ts` | handleCFChallenge after navigation, cookie caching |
+| `packages/tools/src/index.ts` | Export CF bypass utilities and types |

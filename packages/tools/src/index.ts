@@ -23,6 +23,15 @@ export type { ProxyConfig, RotationStrategy } from './utils/proxy-rotator.js';
 export { generateStealthProfile, getStealthLaunchArgs, applyStealthEvasions, getGoogleSearchReferer } from './utils/browser-stealth.js';
 export type { StealthProfile } from './utils/browser-stealth.js';
 export {
+  isCloudflareChallenge,
+  isCloudflareResponse,
+  solveCFChallenge,
+  buildCFHeaders,
+  getCFCookieCache,
+  extractDomain,
+} from './utils/cf-bypass.js';
+export type { CFCookie } from './utils/cf-bypass.js';
+export {
   generateFingerprintId,
   createFingerprint,
   computeSimilarity,
