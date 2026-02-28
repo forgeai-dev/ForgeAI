@@ -496,6 +496,7 @@ export function SettingsPage() {
               </button>
               {domainValue && (
                 <button
+                  title="Remove domain"
                   onClick={async () => { await api.deleteDomainSettings(); loadDomainSettings(); }}
                   className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs"
                 >

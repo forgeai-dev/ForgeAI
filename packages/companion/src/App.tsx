@@ -714,7 +714,7 @@ export default function App() {
         <TitleBar />
 
         {/* Content */}
-        <div className="flex-1 flex flex-col items-center" style={{ padding: '24px 28px 16px' }}>
+        <div className="flex-1 flex flex-col items-center setup-content">
           {/* Logo + title */}
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-lg shadow-orange-500/20 mb-4">
             <Flame className="w-7 h-7 text-white" />
@@ -723,9 +723,9 @@ export default function App() {
           <p className="text-sm text-zinc-500 mt-1">Enter your Gateway URL and pairing code</p>
 
           {/* Form card */}
-          <div className="setup-card" style={{ marginTop: 24 }}>
+          <div className="setup-card setup-card-mt">
             {/* Gateway URL */}
-            <div style={{ marginBottom: 20 }}>
+            <div className="setup-field-gap">
               <label className="setup-label">Gateway URL</label>
               <div className="setup-input-wrap">
                 <div className="setup-input-icon">
@@ -754,15 +754,14 @@ export default function App() {
                   value={pairingCode}
                   onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
                   maxLength={20}
-                  className="setup-input"
-                  style={{ letterSpacing: '0.05em' }}
+                  className="setup-input setup-input-tracking"
                 />
               </div>
             </div>
           </div>
 
           {pairError && (
-            <div style={{ width: '100%', marginTop: 12, fontSize: 12, color: '#f87171', background: '#1c1917', border: '1px solid #7f1d1d', borderRadius: 12, padding: '10px 16px' }}>
+            <div className="setup-error">
               {pairError}
             </div>
           )}
@@ -771,13 +770,12 @@ export default function App() {
           <button
             onClick={handlePair}
             disabled={pairing || !gatewayUrl.trim() || pairingCode.length < 6}
-            className="setup-btn"
-            style={{ marginTop: 20 }}
+            className="setup-btn setup-btn-mt"
           >
             {pairing ? 'Connecting...' : 'Connect'}
             {!pairing && (
               <span className="setup-btn-arrow">
-                <ArrowRight className="w-5 h-5" style={{ color: 'white' }} />
+                <ArrowRight className="w-5 h-5 text-white" />
               </span>
             )}
           </button>
@@ -1052,12 +1050,12 @@ export default function App() {
       {/* Messages */}
       <div className="chat-messages">
         {messages.length === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, #f97316, #c2410c)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-              <Flame style={{ width: 24, height: 24, color: 'white' }} />
+          <div className="chat-empty">
+            <div className="chat-empty-logo">
+              <Flame />
             </div>
-            <p style={{ fontSize: 13, color: '#a1a1aa', fontWeight: 500 }}>Hey! I'm ForgeAI</p>
-            <p style={{ fontSize: 11, color: '#52525b', marginTop: 4, maxWidth: 220 }}>
+            <p className="chat-empty-title">Hey! I'm ForgeAI</p>
+            <p className="chat-empty-subtitle">
               Ask me anything or give me a command. I can manage files, launch apps, and more.
             </p>
           </div>
