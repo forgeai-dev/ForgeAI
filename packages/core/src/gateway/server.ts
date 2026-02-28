@@ -13,7 +13,7 @@ import {
   UserRole,
   type HealthStatus,
 } from '@forgeai/shared';
-import { registerChatRoutes, getTelegramChannel } from './chat-routes.js';
+import { registerChatRoutes, getTelegramChannel, getAppRegistry } from './chat-routes.js';
 import { registerConfigSyncRoutes } from './config-sync.js';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { getCompanionBridge } from './companion-bridge.js';
@@ -162,6 +162,12 @@ export class Gateway {
 
     // Register chat + agent routes (pass vault for persistent key storage)
     await registerChatRoutes(this.app, this.vault, this.auth);
+
+    // ─── Subdomain Routing Middleware ─────────────────
+    // If a domain is configured with subdomains enabled, routes like
+    //   painel.forge.domain.com → serves site "painel" from workspace
+    //   meuapp.forge.domain.com → proxies to registered app port
+    this.registerSubdomainRouting();
 
     // Wire security alerts → Telegram + WebSocket
     this.registerSecurityAlerts();
@@ -1872,6 +1878,129 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       if (email) return email;
     }
     return process.env['ADMIN_EMAIL'] || null;
+  }
+
+  /**
+   * Subdomain routing: intercepts requests where Host = <name>.<domain>
+   * and serves the corresponding site from workspace or proxies to an app port.
+   */
+  private registerSubdomainRouting(): void {
+    this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      // Only active if domain + subdomains are configured in Vault
+      if (!this.vault.isInitialized()) return;
+      const domain = this.vault.get('config:domain');
+      const subdomainsEnabled = this.vault.get('config:subdomains_enabled') === 'true';
+      if (!domain || !subdomainsEnabled) return;
+
+      // Extract hostname (strip port if present)
+      const host = (request.headers.host || '').split(':')[0].toLowerCase();
+      if (!host || host === domain || !host.endsWith(`.${domain}`)) return;
+
+      // Extract subdomain: e.g., "painel.forge.domain.com" → "painel"
+      const subdomain = host.slice(0, host.length - domain.length - 1);
+      if (!subdomain || subdomain.includes('.')) return; // Skip nested subdomains
+
+      // Skip API/WS/health paths — they should always go to the gateway
+      const path = request.url.split('?')[0];
+      if (path.startsWith('/api/') || path.startsWith('/ws') || path === '/health' || path === '/info') return;
+
+      const { resolve, normalize, sep, join } = await import('node:path');
+      const { createReadStream, existsSync, statSync } = await import('node:fs');
+
+      // Check 1: Is this a registered app? → proxy to its port
+      const appRegistry = getAppRegistry();
+      const registeredApp = appRegistry.get(subdomain);
+      if (registeredApp) {
+        const subPath = path === '/' ? '' : path.slice(1);
+        const targetUrl = `http://127.0.0.1:${registeredApp.port}/${subPath}`;
+        try {
+          const headers: Record<string, string> = {};
+          if (request.headers['content-type']) headers['content-type'] = request.headers['content-type'] as string;
+          if (request.headers['accept']) headers['accept'] = request.headers['accept'] as string;
+
+          const fetchOpts: RequestInit = { method: request.method, headers };
+          if (request.method !== 'GET' && request.method !== 'HEAD') {
+            fetchOpts.body = typeof request.body === 'string' ? request.body : JSON.stringify(request.body);
+          }
+
+          const proxyRes = await fetch(targetUrl, fetchOpts);
+          reply.status(proxyRes.status);
+          const ct = proxyRes.headers.get('content-type');
+          if (ct) reply.header('Content-Type', ct);
+          reply.header('Access-Control-Allow-Origin', '*');
+          const body = await proxyRes.text();
+          reply.send(body);
+        } catch {
+          reply.status(502).send({ error: `App "${subdomain}" not running on port ${registeredApp.port}` });
+        }
+        return;
+      }
+
+      // Check 2: Is this a workspace site directory? → serve static files
+      const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+      const siteDir = resolve(workspaceDir, subdomain);
+
+      if (!existsSync(siteDir) || !statSync(siteDir).isDirectory()) {
+        // No site/app found for this subdomain — let it fall through to normal routing
+        return;
+      }
+
+      // Security: prevent directory traversal
+      if (!normalize(siteDir).startsWith(workspaceDir + sep)) {
+        reply.status(403).send({ error: 'Access denied' });
+        return;
+      }
+
+      // Resolve file path within the site directory
+      const urlPath = path === '/' ? '' : path.slice(1);
+      let filePath = normalize(resolve(siteDir, urlPath));
+
+      // Prevent traversal outside site dir
+      if (!filePath.startsWith(siteDir + sep) && filePath !== siteDir) {
+        reply.status(403).send({ error: 'Access denied' });
+        return;
+      }
+
+      // Directory → try index.html
+      if (existsSync(filePath) && statSync(filePath).isDirectory()) {
+        const indexPath = join(filePath, 'index.html');
+        if (existsSync(indexPath)) {
+          filePath = indexPath;
+        } else {
+          reply.status(404).send({ error: 'No index.html found' });
+          return;
+        }
+      }
+
+      if (!existsSync(filePath)) {
+        // SPA fallback: try site root index.html
+        const rootIndex = join(siteDir, 'index.html');
+        if (existsSync(rootIndex)) {
+          filePath = rootIndex;
+        } else {
+          reply.status(404).send({ error: 'File not found' });
+          return;
+        }
+      }
+
+      const ext = filePath.split('.').pop()?.toLowerCase() || '';
+      const mimeTypes: Record<string, string> = {
+        html: 'text/html', css: 'text/css', js: 'application/javascript',
+        json: 'application/json', txt: 'text/plain',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon',
+        woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+        mp4: 'video/mp4', mp3: 'audio/mpeg', pdf: 'application/pdf',
+      };
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+      reply.header('Content-Type', contentType);
+      reply.header('Cache-Control', 'public, max-age=300');
+      reply.header('Access-Control-Allow-Origin', '*');
+      reply.send(createReadStream(filePath));
+    });
+
+    logger.info('Subdomain routing middleware registered');
   }
 
   /**

@@ -70,6 +70,61 @@ let activityStore: ActivityStore | null = null;
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
 
+// ─── App Registry: maps app name → port for subdomain routing ───
+// Allows agent-created apps to be accessed via subdomain (e.g., painel.domain.com → port 3456)
+const appRegistry = new Map<string, { port: number; name: string; createdAt: string; description?: string }>();
+
+export function getAppRegistry(): Map<string, { port: number; name: string; createdAt: string; description?: string }> {
+  return appRegistry;
+}
+
+/**
+ * Resolve the public URL for a site or app, using domain config from Vault if available.
+ * Falls back to IP:port path-based URLs.
+ */
+export function resolvePublicUrl(vault?: Vault | null): { baseUrl: string; domain: string | null; subdomainsEnabled: boolean } {
+  const domain = vault?.isInitialized() ? (vault.get('config:domain') || null) : null;
+  const subdomainsEnabled = vault?.isInitialized() ? (vault.get('config:subdomains_enabled') === 'true') : false;
+  const gatewayPort = process.env.GATEWAY_PORT || '18800';
+  const gatewayHost = process.env.GATEWAY_HOST || 'localhost';
+
+  let baseUrl: string;
+  if (domain) {
+    // Domain configured — use HTTPS (Caddy handles TLS)
+    baseUrl = `https://${domain}`;
+  } else if (process.env.PUBLIC_URL) {
+    baseUrl = process.env.PUBLIC_URL.replace(/\/$/, '');
+  } else {
+    const host = gatewayHost === '0.0.0.0' ? 'localhost' : gatewayHost;
+    baseUrl = `http://${host}:${gatewayPort}`;
+  }
+
+  return { baseUrl, domain, subdomainsEnabled };
+}
+
+/**
+ * Generate the public URL for a specific site or app.
+ */
+export function getSiteUrl(name: string, type: 'site' | 'app', vault?: Vault | null): string {
+  const { baseUrl, domain, subdomainsEnabled } = resolvePublicUrl(vault);
+
+  if (domain && subdomainsEnabled) {
+    // Subdomain mode: painel.forge.domain.com
+    return `https://${name}.${domain}`;
+  }
+
+  // Path mode fallback
+  if (type === 'site') {
+    return `${baseUrl}/sites/${name}/`;
+  }
+  // For apps, look up port from registry
+  const app = appRegistry.get(name);
+  if (app) {
+    return `${baseUrl}/apps/${app.port}/`;
+  }
+  return `${baseUrl}/sites/${name}/`;
+}
+
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
 }
@@ -1351,8 +1406,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         lines.push(`Active scheduled tasks: ${cronTool.tasks.size}`);
       }
 
+      // Domain & App Registry
+      const { baseUrl, domain, subdomainsEnabled } = resolvePublicUrl(vault);
+      if (domain) {
+        lines.push(`Domain: ${domain} (HTTPS via Caddy)`);
+        if (subdomainsEnabled) {
+          lines.push(`Subdomains: ENABLED — sites/apps get URLs like https://<name>.${domain}`);
+        } else {
+          lines.push(`Subdomains: DISABLED — using path-based URLs: ${baseUrl}/sites/<name>/`);
+        }
+      } else {
+        lines.push(`Domain: NOT CONFIGURED — using ${baseUrl}`);
+        lines.push(`Sites: ${baseUrl}/sites/<name>/ | Apps: ${baseUrl}/apps/<port>/`);
+      }
+
+      // Registered apps
+      if (appRegistry.size > 0) {
+        const appList = Array.from(appRegistry.entries()).map(([name, info]) => {
+          const url = getSiteUrl(name, 'app', vault);
+          return `${name} (port ${info.port}) → ${url}`;
+        });
+        lines.push(`Registered Apps: ${appList.join('; ')}`);
+      }
+
       lines.push('IMPORTANT: Do NOT re-configure channels that are already CONNECTED or CONFIGURED. Use them directly. Only configure channels marked as NOT CONFIGURED if the user requests it.');
       lines.push('IMPORTANT: When user asks you to send something to a channel (e.g. Telegram), just respond with that content — the system delivers it automatically. Do NOT use shell_exec/curl to call APIs.');
+      lines.push('IMPORTANT: After starting a dynamic app server, register it via POST /api/apps/register {name, port, description} to get a clean URL.');
 
       return lines.join('\n');
     });
@@ -3306,6 +3385,167 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     logger.info('Language updated', { language: lang });
     return { language: lang };
   });
+
+  // ─── Domain & Subdomain Settings ──────────────────
+
+  app.get('/api/settings/domain', async () => {
+    const domain = vault?.isInitialized() ? (vault.get('config:domain') || '') : '';
+    const subdomainsEnabled = vault?.isInitialized() ? (vault.get('config:subdomains_enabled') === 'true') : false;
+    const { baseUrl } = resolvePublicUrl(vault);
+
+    // List existing sites from workspace
+    const { resolve } = await import('node:path');
+    const { existsSync, readdirSync, statSync } = await import('node:fs');
+    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const sites: Array<{ name: string; type: 'site' | 'app'; url: string; port?: number }> = [];
+
+    // Static sites from workspace directories
+    if (existsSync(workspaceDir)) {
+      const dirs = readdirSync(workspaceDir).filter(d => {
+        try {
+          return statSync(resolve(workspaceDir, d)).isDirectory();
+        } catch { return false; }
+      });
+      for (const dir of dirs) {
+        // Check if it has an index.html (static site)
+        const hasIndex = existsSync(resolve(workspaceDir, dir, 'index.html'))
+          || existsSync(resolve(workspaceDir, dir, 'public', 'index.html'));
+        if (hasIndex) {
+          sites.push({ name: dir, type: 'site', url: getSiteUrl(dir, 'site', vault) });
+        }
+      }
+    }
+
+    // Registered dynamic apps
+    for (const [name, app] of appRegistry) {
+      sites.push({ name, type: 'app', url: getSiteUrl(name, 'app', vault), port: app.port });
+    }
+
+    return {
+      domain,
+      subdomainsEnabled,
+      baseUrl,
+      sites,
+      dnsInstructions: domain ? {
+        aRecord: { type: 'A', name: domain, value: '<your-server-ip>' },
+        wildcardRecord: subdomainsEnabled ? { type: 'A', name: `*.${domain}`, value: '<your-server-ip>' } : null,
+        caddyRequired: true,
+        caddyCommand: `docker compose --profile domain up -d`,
+      } : null,
+    };
+  });
+
+  app.put('/api/settings/domain', async (request: FastifyRequest) => {
+    const body = request.body as { domain?: string; subdomainsEnabled?: boolean };
+    if (!vault?.isInitialized()) return { error: 'Vault not initialized' };
+
+    const domain = (body.domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+    if (domain) {
+      // Basic domain validation
+      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/.test(domain)) {
+        return { error: 'Invalid domain format. Example: forge.mydomain.com' };
+      }
+      vault.set('config:domain', domain);
+    } else {
+      vault.delete('config:domain');
+    }
+
+    if (body.subdomainsEnabled !== undefined) {
+      vault.set('config:subdomains_enabled', body.subdomainsEnabled ? 'true' : 'false');
+    }
+
+    const { baseUrl, subdomainsEnabled } = resolvePublicUrl(vault);
+    logger.info('Domain settings updated', { domain: domain || '(none)', subdomainsEnabled });
+    return { domain: domain || null, subdomainsEnabled, baseUrl };
+  });
+
+  app.delete('/api/settings/domain', async () => {
+    if (vault?.isInitialized()) {
+      vault.delete('config:domain');
+      vault.delete('config:subdomains_enabled');
+    }
+    logger.info('Domain settings removed');
+    return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
+  });
+
+  // ─── App Registry ─────────────────────────────────
+
+  app.get('/api/apps/registry', async () => {
+    const apps = Array.from(appRegistry.entries()).map(([name, info]) => ({
+      name,
+      port: info.port,
+      url: getSiteUrl(name, 'app', vault),
+      createdAt: info.createdAt,
+      description: info.description,
+    }));
+    return { apps };
+  });
+
+  app.post('/api/apps/register', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { name?: string; port?: number; description?: string };
+    if (!body.name || !body.port) {
+      reply.status(400).send({ error: 'name and port are required' }); return;
+    }
+
+    const name = body.name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+    if (!name || name.length < 2) {
+      reply.status(400).send({ error: 'App name must be at least 2 characters (alphanumeric + hyphens)' }); return;
+    }
+
+    const portNum = body.port;
+    if (portNum < 1024 || portNum > 65535) {
+      reply.status(400).send({ error: 'Port must be 1024-65535' }); return;
+    }
+
+    appRegistry.set(name, {
+      port: portNum,
+      name,
+      createdAt: new Date().toISOString(),
+      description: body.description,
+    });
+
+    // Persist to vault
+    if (vault?.isInitialized()) {
+      const registryData = JSON.stringify(Array.from(appRegistry.entries()));
+      vault.set('config:app_registry', registryData);
+    }
+
+    const url = getSiteUrl(name, 'app', vault);
+    logger.info('App registered', { name, port: portNum, url });
+    return { name, port: portNum, url, registered: true };
+  });
+
+  app.delete('/api/apps/registry/:name', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { name } = request.params as { name: string };
+    if (!appRegistry.has(name)) {
+      reply.status(404).send({ error: 'App not found' }); return;
+    }
+    appRegistry.delete(name);
+
+    // Persist to vault
+    if (vault?.isInitialized()) {
+      const registryData = JSON.stringify(Array.from(appRegistry.entries()));
+      vault.set('config:app_registry', registryData);
+    }
+
+    logger.info('App unregistered', { name });
+    return { deleted: true, name };
+  });
+
+  // Restore app registry from Vault on startup
+  if (vault?.isInitialized()) {
+    try {
+      const saved = vault.get('config:app_registry');
+      if (saved) {
+        const entries = JSON.parse(saved) as Array<[string, { port: number; name: string; createdAt: string; description?: string }]>;
+        for (const [name, info] of entries) {
+          appRegistry.set(name, info);
+        }
+        logger.info('App registry restored', { count: appRegistry.size });
+      }
+    } catch { /* ignore parse errors */ }
+  }
 
   // ─── Webhook Manager ───────────────────────────────
 

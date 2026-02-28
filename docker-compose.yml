@@ -82,6 +82,7 @@ services:
       # Puppeteer
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    shm_size: '8gb'
     volumes:
       - forgeai_data:/app/.forgeai
     healthcheck:

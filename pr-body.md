@@ -1,6 +1,6 @@
 ## Description
 
-Scrapling-inspired advanced web scraping features: stealth browser mode, HTML→Markdown conversion, proxy rotation, and adaptive element tracking.
+Subdomain system for agent-created sites and apps, managed via the Dashboard. Includes domain settings API, app registry, subdomain routing middleware, dashboard UI, agent-aware URL generation, and Caddy wildcard config. Also increases Docker shm_size to 8GB for Chromium stability.
 
 ## Type of Change
 
@@ -9,49 +9,50 @@ Scrapling-inspired advanced web scraping features: stealth browser mode, HTML→
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
 - [ ] Tests
-- [x] Security
+- [ ] Security
 
 ## Changes Made
 
-### 1. Browser Stealth Mode
-- `packages/tools/src/utils/browser-stealth.ts`: Comprehensive anti-detection module with dynamic stealth profiles — user-agent rotation, viewport randomization, canvas noise injection, WebGL vendor/renderer masking, WebRTC leak prevention, CDP detection hiding, navigator property spoofing, Google search referer spoofing
-- `packages/tools/src/tools/puppeteer-browser.ts`: Stealth profile generated on each browser launch, evasions applied to every new page
+### 1. Domain Settings API (Vault-persisted)
+- `packages/core/src/gateway/chat-routes.ts`: GET/PUT/DELETE `/api/settings/domain` — stores domain & subdomains_enabled in Vault, returns DNS instructions and active sites/apps list
+- No `.env` changes needed — all config via Dashboard
 
-### 2. HTML→Markdown Conversion
-- `packages/tools/src/tools/web-browser.ts`: New `extract="markdown"` mode using TurndownService — converts HTML to clean Markdown, strips noisy elements (img, iframe, svg, video, audio), collapses excessive whitespace. Reduces token usage vs raw text for AI consumption
-- `packages/tools/package.json`: Added `turndown` + `@types/turndown` dependencies
-- `packages/agent/src/runtime.ts`: System prompt updated to prefer `extract="markdown"` for web page reading
+### 2. App Registry
+- `packages/core/src/gateway/chat-routes.ts`: In-memory `appRegistry` Map (name↔port), persisted to Vault. Endpoints: GET `/api/apps/registry`, POST `/api/apps/register`, DELETE `/api/apps/registry/:name`
+- `resolvePublicUrl()` and `getSiteUrl()` helper functions for domain-aware URL generation
 
-### 3. Proxy Rotation
-- `packages/tools/src/utils/proxy-rotator.ts`: `ProxyRotator` class with cyclic/random/failover strategies, proxy URL parsing, error detection (`isProxyError()`), failure reporting, global singleton management via `configureProxies()`
-- `packages/tools/src/tools/puppeteer-browser.ts`: Proxy injected into Chrome launch args + page-level auth for authenticated proxies
-- `packages/tools/src/tools/web-browser.ts`: Proxy headers and rotation integrated into fetch requests with error reporting
+### 3. Subdomain Routing Middleware
+- `packages/core/src/gateway/server.ts`: `registerSubdomainRouting()` — Fastify `onRequest` hook reads Host header, extracts subdomain, routes to workspace static site or proxies to registered app port
 
-### 4. Adaptive Element Tracking
-- `packages/tools/src/utils/element-fingerprint.ts`: Element fingerprinting and similarity engine (~530 lines):
-  - `ElementFingerprint` type capturing tag, attributes, text, parent chain, sibling index, depth, child count
-  - 5-dimensional weighted similarity: tag (0.10), attributes/Jaccard (0.30), text/token-overlap (0.25), parent chain (0.20), position (0.15)
-  - Confidence thresholds: high ≥0.75, medium ≥0.55, low ≥0.35
-  - Browser-side extraction script (`EXTRACT_CANDIDATES_SCRIPT`) and Cheerio-side helpers
-  - Pre-filtering by tag + 500-candidate limit for performance
-- `packages/core/src/database/fingerprint-store.ts`: `FingerprintStore` class for MySQL persistence (CRUD, cleanup, match count tracking)
-- `packages/core/src/database/migrations/005_element_fingerprints.ts`: New `element_fingerprints` table
-- `packages/core/src/database/connection.ts`: `applyMigration005` wired into migration runner
-- `packages/tools/src/tools/puppeteer-browser.ts`: `saveFingerprint()` on successful selector match, `adaptiveMatch()` fallback in `content` and `click` actions
-- `packages/tools/src/tools/web-browser.ts`: Same adaptive pattern using Cheerio extraction, `adaptiveInfo` included in all extraction results
+### 4. Agent Runtime (Domain-Aware)
+- `packages/agent/src/runtime.ts`: Updated system prompt SERVER NETWORKING section with app registry instructions and subdomain URL patterns
+- `detectEnvironment()`: Now includes Apps URL, App Registry API endpoint in system state
+- Dynamic context provider: Injects domain config, subdomains status, registered apps with resolved URLs
 
-### Exports
-- `packages/tools/src/index.ts`: All new utilities exported (ProxyRotator, browser-stealth, element-fingerprint)
-- `packages/core/src/index.ts`: `FingerprintStore` + `StoredFingerprint` exported
+### 5. Dashboard UI — Domain & Sites Section
+- `packages/dashboard/src/pages/Settings.tsx`: New "Domain & Sites" section with domain input, save/delete, subdomains toggle, DNS instructions panel, active sites/apps list with links
+- `packages/dashboard/src/lib/api.ts`: Added `getDomainSettings`, `saveDomainSettings`, `deleteDomainSettings`, `getAppRegistry`, `registerApp`, `unregisterApp` API methods
+
+### 6. Caddyfile — Wildcard Subdomain Support
+- `Caddyfile`: Added `*.{$DOMAIN}` block with on-demand TLS for auto-cert per subdomain, proxying all to Gateway
+
+### 7. Docker shm_size
+- `docker-compose.yml`: `shm_size: '8gb'` for gateway container (Chromium stability)
 
 ## How to Test
 
-1. **Stealth Mode**: Use `browser(action="navigate", url="https://bot.sannysoft.com")` → verify all tests pass (no headless detection)
-2. **Markdown Extraction**: Use `web_browse(url="https://example.com", extract="markdown")` → verify clean Markdown output
-3. **Proxy Rotation**: Configure proxies via `configureProxies()` → verify rotation in browser and fetch requests
-4. **Adaptive Tracking**: Use `browser(action="content", selector=".some-class")` → change the class → re-run → verify adaptive match with `adaptiveMatch: true` in response
+1. `pnpm -r build` — all packages compile cleanly
+2. `pnpm forge start --migrate`
+3. **Domain Settings**: Dashboard → Settings → Domain & Sites → set domain, toggle subdomains, verify DNS instructions appear
+4. **App Registry**: Agent creates app → registers via POST `/api/apps/register` → appears in settings list
+5. **Subdomain Routing**: With domain configured + subdomains enabled, access `appname.yourdomain.com` → routes to correct app
+6. **Agent Awareness**: Ask agent to create a site — it should report the correct URL pattern (subdomain if configured, path-based otherwise)
 
 ## Related Issue
+
+N/A
+
+## Screenshots
 
 N/A
 
@@ -60,4 +61,18 @@ N/A
 - [x] Code builds without errors (`pnpm -r build`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Database migration included
+- [x] Documentation updated (if needed)
+
+---
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `packages/core/src/gateway/chat-routes.ts` | Domain settings API, app registry, resolvePublicUrl, getSiteUrl, dynamic context with domain info |
+| `packages/core/src/gateway/server.ts` | Subdomain routing middleware (registerSubdomainRouting) |
+| `packages/agent/src/runtime.ts` | System prompt networking section, detectEnvironment with app registry info |
+| `packages/dashboard/src/pages/Settings.tsx` | Domain & Sites UI section |
+| `packages/dashboard/src/lib/api.ts` | Domain/app-registry API methods |
+| `Caddyfile` | Wildcard subdomain block with on-demand TLS |
+| `docker-compose.yml` | shm_size: 8gb |

@@ -236,4 +236,24 @@ export const api = {
     request<{ saved: boolean; filename: string; chars: number }>(`/api/workspace/prompts/${encodeURIComponent(filename)}`, {
       method: 'PUT', body: JSON.stringify({ content }),
     }),
+  // Domain & Sites
+  getDomainSettings: () => request<{
+    domain: string; subdomainsEnabled: boolean; baseUrl: string;
+    sites: Array<{ name: string; type: 'site' | 'app'; url: string; port?: number }>;
+    dnsInstructions: { aRecord: { type: string; name: string; value: string }; wildcardRecord: { type: string; name: string; value: string } | null; caddyRequired: boolean; caddyCommand: string } | null;
+  }>('/api/settings/domain'),
+  saveDomainSettings: (domain: string, subdomainsEnabled: boolean) =>
+    request<{ domain: string | null; subdomainsEnabled: boolean; baseUrl: string }>('/api/settings/domain', {
+      method: 'PUT', body: JSON.stringify({ domain, subdomainsEnabled }),
+    }),
+  deleteDomainSettings: () =>
+    request<{ domain: null; subdomainsEnabled: boolean; baseUrl: string }>('/api/settings/domain', { method: 'DELETE' }),
+  // App Registry
+  getAppRegistry: () => request<{ apps: Array<{ name: string; port: number; url: string; createdAt: string; description?: string }> }>('/api/apps/registry'),
+  registerApp: (name: string, port: number, description?: string) =>
+    request<{ name: string; port: number; url: string; registered: boolean }>('/api/apps/register', {
+      method: 'POST', body: JSON.stringify({ name, port, description }),
+    }),
+  unregisterApp: (name: string) =>
+    request<{ deleted: boolean; name: string }>(`/api/apps/registry/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };

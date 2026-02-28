@@ -99,6 +99,16 @@ export function SettingsPage() {
   const [spotifyError, setSpotifyError] = useState('');
   const [spotifyShowSecret, setSpotifyShowSecret] = useState(false);
 
+  // Domain & Sites state
+  const [domainValue, setDomainValue] = useState('');
+  const [subdomainsEnabled, setSubdomainsEnabled] = useState(false);
+  const [domainSaving, setDomainSaving] = useState(false);
+  const [domainSaved, setDomainSaved] = useState(false);
+  const [domainError, setDomainError] = useState('');
+  const [domainBaseUrl, setDomainBaseUrl] = useState('');
+  const [domainSites, setDomainSites] = useState<Array<{ name: string; type: 'site' | 'app'; url: string; port?: number }>>([]);
+  const [domainDns, setDomainDns] = useState<{ aRecord: { type: string; name: string; value: string }; wildcardRecord: { type: string; name: string; value: string } | null } | null>(null);
+
   // Config Sync state
   const [syncRemoteUrl, setSyncRemoteUrl] = useState('');
   const [syncCode, setSyncCode] = useState('');
@@ -114,6 +124,35 @@ export function SettingsPage() {
   const [nodeGeneratedKey, setNodeGeneratedKey] = useState<string | null>(null);
   const [nodeConnInfo, setNodeConnInfo] = useState<{ gatewayUrl?: string; wsUrl?: string; keyPrefix?: string; example?: string } | null>(null);
   const [nodeCopied, setNodeCopied] = useState<string | null>(null);
+
+  const loadDomainSettings = useCallback(() => {
+    api.getDomainSettings().then(r => {
+      setDomainValue(r.domain || '');
+      setSubdomainsEnabled(r.subdomainsEnabled);
+      setDomainBaseUrl(r.baseUrl);
+      setDomainSites(r.sites || []);
+      setDomainDns(r.dnsInstructions || null);
+    }).catch(() => {});
+  }, []);
+
+  const handleDomainSave = async () => {
+    setDomainSaving(true);
+    setDomainError('');
+    try {
+      const res = await api.saveDomainSettings(domainValue, subdomainsEnabled);
+      if ((res as any).error) {
+        setDomainError((res as any).error);
+      } else {
+        setDomainSaved(true);
+        setTimeout(() => setDomainSaved(false), 2000);
+        loadDomainSettings();
+      }
+    } catch (err) {
+      setDomainError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setDomainSaving(false);
+    }
+  };
 
   const loadProviders = useCallback(() => {
     api.getProviders().then(r => setProviders(r.providers)).catch(() => {});
@@ -149,7 +188,7 @@ export function SettingsPage() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); loadHAConfig(); loadSpotifyConfig(); }, [loadProviders, loadServices, loadSMTPConfig, loadHAConfig, loadSpotifyConfig]);
+  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); loadHAConfig(); loadSpotifyConfig(); loadDomainSettings(); }, [loadProviders, loadServices, loadSMTPConfig, loadHAConfig, loadSpotifyConfig, loadDomainSettings]);
 
   // Load wake word status
   const loadWakeWordStatus = useCallback(() => {
@@ -417,6 +456,117 @@ export function SettingsPage() {
               <option value="zh">中文</option>
             </select>
           </div>
+        </div>
+      </section>
+
+      {/* Domain & Sites */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Wifi className="w-5 h-5 text-forge-400" />
+          Domain & Sites
+        </h2>
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
+          {/* Current URL */}
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <span className="text-zinc-500">Base URL:</span>
+            <code className="bg-zinc-800 px-2 py-0.5 rounded text-zinc-300">{domainBaseUrl || 'loading...'}</code>
+          </div>
+
+          {/* Domain input */}
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Custom Domain</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="forge.mydomain.com"
+                value={domainValue}
+                onChange={e => setDomainValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { handleDomainSave(); } }}
+                className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+              />
+              <button
+                title="Save domain"
+                onClick={handleDomainSave}
+                disabled={domainSaving}
+                className={`px-4 py-2 rounded-lg text-white text-xs font-medium transition-all ${
+                  domainSaved ? 'bg-emerald-500' : domainSaving ? 'bg-forge-500/50 cursor-wait' : 'bg-forge-500 hover:bg-forge-600'
+                }`}
+              >
+                {domainSaved ? <Check className="w-3.5 h-3.5" /> : domainSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              </button>
+              {domainValue && (
+                <button
+                  onClick={async () => { await api.deleteDomainSettings(); loadDomainSettings(); }}
+                  className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {domainError && <p className="text-xs text-red-400 mt-1">{domainError}</p>}
+          </div>
+
+          {/* Subdomains toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium">Enable Subdomains</p>
+              <p className="text-xs text-zinc-500">Sites/apps get clean URLs: <code className="text-zinc-400">app-name.{domainValue || 'domain.com'}</code></p>
+            </div>
+            <button
+              title="Toggle subdomains"
+              onClick={async () => {
+                const newVal = !subdomainsEnabled;
+                setSubdomainsEnabled(newVal);
+                await api.saveDomainSettings(domainValue, newVal);
+                loadDomainSettings();
+              }}
+              className={`w-11 h-6 rounded-full transition-colors relative ${subdomainsEnabled ? 'bg-forge-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`block w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${subdomainsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* DNS Instructions */}
+          {domainDns && (
+            <div className="bg-zinc-900/50 rounded-lg p-3 space-y-2 border border-zinc-700/50">
+              <p className="text-xs font-medium text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> DNS Configuration Required</p>
+              <div className="text-xs text-zinc-400 space-y-1">
+                <p>Add these DNS records pointing to your server IP:</p>
+                <code className="block bg-zinc-800 p-2 rounded text-zinc-300">
+                  {domainDns.aRecord.type} {domainDns.aRecord.name} → {domainDns.aRecord.value}
+                </code>
+                {domainDns.wildcardRecord && (
+                  <code className="block bg-zinc-800 p-2 rounded text-zinc-300">
+                    {domainDns.wildcardRecord.type} {domainDns.wildcardRecord.name} → {domainDns.wildcardRecord.value}
+                  </code>
+                )}
+                <p className="text-zinc-500 mt-1">Then run: <code className="text-zinc-400">docker compose --profile domain up -d</code></p>
+              </div>
+            </div>
+          )}
+
+          {/* Active Sites & Apps */}
+          {domainSites.length > 0 && (
+            <div>
+              <p className="text-xs text-zinc-400 mb-2">Active Sites & Apps ({domainSites.length})</p>
+              <div className="space-y-1">
+                {domainSites.map(site => (
+                  <div key={site.name} className="flex items-center justify-between bg-zinc-800/50 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${site.type === 'app' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                        {site.type}
+                      </span>
+                      <span className="text-sm text-white">{site.name}</span>
+                      {site.port && <span className="text-[10px] text-zinc-500">:{site.port}</span>}
+                    </div>
+                    <a href={site.url} target="_blank" rel="noopener noreferrer" className="text-xs text-forge-400 hover:text-forge-300 flex items-center gap-1">
+                      {site.url.replace(/^https?:\/\//, '')} <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

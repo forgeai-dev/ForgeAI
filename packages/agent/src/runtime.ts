@@ -643,9 +643,12 @@ spotify: Control Spotify playback. Actions: play|pause|next|previous|search|curr
 - THREE ways to serve content:
   1. STATIC SITES: files in .forgeai/workspace/<project>/ → auto-served at ${publicUrl}/sites/<project>/
   2. DYNAMIC APPS: start server on port in BACKGROUND → ${publicUrl}/apps/<port>/
+     After starting, register the app: POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, description:"<desc>"}
+     This gives the app a clean name for subdomain routing (if domain is configured).
   3. HOST SERVICES: use target="host" for persistent services directly on VPS.
 - ALWAYS start in background. NEVER run in foreground (blocks and times out).
 - ALWAYS report the public URL to the user, NEVER localhost or internal Docker IPs.
+- Check "Current System State" for domain config — if domain with subdomains is enabled, apps get URLs like https://<name>.<domain>/
 
 ── SELF-MANAGEMENT (CRITICAL) ─────────────────────
 You have FULL control over ALL your tools and infrastructure. When a tool fails, diagnose and fix it yourself.
@@ -741,6 +744,8 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
         || `http://${process.env.GATEWAY_HOST === '0.0.0.0' ? (localIPs[0] || 'localhost') : (process.env.GATEWAY_HOST || 'localhost')}:${process.env.GATEWAY_PORT || '18800'}`;
       parts.push(`Public URL: ${publicUrl}`);
       parts.push(`Sites URL: ${publicUrl}/sites/<project-name>/`);
+      parts.push(`Apps URL: ${publicUrl}/apps/<port>/`);
+      parts.push(`App Registry API: POST ${publicUrl}/api/apps/register {name, port, description}`);
 
       if (localIPs.length > 0) {
         parts.push(`Network IPs: ${localIPs.join(', ')}`);
