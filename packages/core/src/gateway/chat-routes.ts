@@ -4,12 +4,12 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
-import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer } from '@forgeai/agent';
+import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
@@ -445,6 +445,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // Wire delegation tools with AgentManager for sub-agent task delegation
   setDelegateManagerRef(agentManager);
+
+  // Wire Forge Teams engine with AgentManager for coordinated team execution
+  const forgeTeamEngine = createForgeTeamEngine(agentManager);
+  setForgeTeamRef(forgeTeamEngine, { getActiveTeams });
 
   // Wire CronSchedulerTool callback for proactive message delivery
   const cronTool = toolRegistry.get('cron_scheduler') as CronSchedulerTool | undefined;
@@ -2791,10 +2795,27 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // ─── REST API: Multi-Agent Management ──────────────
 
-  // GET /api/agents — list all agents
+  // GET /api/agents — list all agents (includes active Forge Teams)
   app.get('/api/agents', async () => {
-    if (!agentManager) return { agents: [] };
-    return { agents: agentManager.listAgents(), bindings: agentManager.getBindings() };
+    if (!agentManager) return { agents: [], teams: [] };
+    const teams = getActiveTeams().map(t => ({
+      id: t.id,
+      name: t.name,
+      type: 'forge_team',
+      status: t.status,
+      workers: t.workers.map(w => ({ taskId: w.taskId, role: w.role, status: w.status })),
+      createdAt: t.createdAt,
+      completedAt: t.completedAt,
+      taskCount: t.taskCount,
+      completedCount: t.completedCount,
+      failedCount: t.failedCount,
+    }));
+    return { agents: agentManager.listAgents(), bindings: agentManager.getBindings(), teams };
+  });
+
+  // GET /api/teams/active — list active Forge Teams
+  app.get('/api/teams/active', async () => {
+    return { teams: getActiveTeams() };
   });
 
   // POST /api/agents — add a new agent

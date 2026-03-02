@@ -47,9 +47,10 @@ FROM node:22-slim AS production
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install Chromium for Puppeteer + util-linux (nsenter for host access)
+# Install Chromium for Puppeteer + Python3 + pip + util-linux (nsenter for host access)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends chromium util-linux && \
+    apt-get install -y --no-install-recommends chromium util-linux python3 python3-pip python3-venv curl git && \
+    ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
