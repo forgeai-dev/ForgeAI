@@ -29,3 +29,6 @@ cookies.txt
 
 # Landing page website (deployed separately, not part of the codebase)
 website/
+
+# Cloudflare Bypass Demo
+cf-bypass-demo.html

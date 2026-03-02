@@ -1931,7 +1931,8 @@ document.getElementById('smtp-user').addEventListener('input', function() {
           const body = await proxyRes.text();
           reply.send(body);
         } catch {
-          reply.status(502).send({ error: `App "${subdomain}" not running on port ${registeredApp.port}` });
+          const { generateAppDownPage } = await import('./app-manager.js');
+          reply.status(502).header('Content-Type', 'text/html; charset=utf-8').send(generateAppDownPage(registeredApp.port, subdomain));
         }
         return;
       }
