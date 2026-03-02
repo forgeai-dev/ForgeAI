@@ -4,6 +4,7 @@ import { createPromptGuard, createAuditLogger, type PromptGuard, type AuditLogge
 import { LLMRouter } from './router.js';
 import { UsageTracker, createUsageTracker } from './usage-tracker.js';
 import { MemoryManager } from './memory-manager.js';
+import { PromptOptimizer } from './prompt-optimizer.js';
 import { loadWorkspacePrompts } from './workspace-prompts.js';
 
 export interface ToolExecutor {
@@ -186,6 +187,7 @@ export class AgentRuntime {
   private abortedSessions: Set<string> = new Set();
   private contextProvider: (() => string | null) | null = null;
   private planContextProvider: ((sessionId: string) => string | null) | null = null;
+  private promptOptimizer: PromptOptimizer | null = null;
 
   constructor(config: AgentConfig, router?: LLMRouter, usageTracker?: UsageTracker) {
     this.config = config;
@@ -212,6 +214,15 @@ export class AgentRuntime {
   setMemoryManager(memory: MemoryManager): void {
     this.memoryManager = memory;
     logger.info('Memory manager attached to agent runtime (cross-session memory enabled)');
+  }
+
+  setPromptOptimizer(optimizer: PromptOptimizer): void {
+    this.promptOptimizer = optimizer;
+    logger.info('Prompt optimizer attached to agent runtime (auto-optimization enabled)');
+  }
+
+  getPromptOptimizer(): PromptOptimizer | null {
+    return this.promptOptimizer;
   }
 
   getMemoryManager(): MemoryManager | null {
@@ -893,6 +904,13 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
         enrichedSystemPrompt += `\n\n--- ${learningContext}`;
       }
     }
+    // Inject prompt optimization context (learned patterns from past tasks)
+    if (this.promptOptimizer && !isLocalLLM) {
+      const optimizedCtx = this.promptOptimizer.buildOptimizedContext(params.content);
+      if (optimizedCtx) {
+        enrichedSystemPrompt += `\n\n--- ${optimizedCtx}`;
+      }
+    }
     // Inject dynamic system state context (channels, integrations, etc.)
     if (this.contextProvider && !isLocalLLM) {
       const dynamicCtx = this.contextProvider();
@@ -1300,6 +1318,24 @@ If everything is correct, present your final answer now. If you find issues, mak
 
       // Adaptive learning: extract patterns from this interaction
       this.learnFromInteraction(params.sessionId, params.content, response!.content, steps, duration);
+
+      // Prompt optimizer: record structured outcome for auto-optimization
+      if (this.promptOptimizer) {
+        const totalToolCalls = steps.filter(s => s.type === 'tool_call').length;
+        const hasReflection = steps.some(s => s.type === 'thinking' && s.message?.includes('Verifying'));
+        const failedSteps = steps.filter(s => s.type === 'tool_result' && !s.success);
+        const reflectionIdx = steps.findIndex(s => s.type === 'thinking' && s.message?.includes('Verifying'));
+        const postReflectionCalls = reflectionIdx >= 0 ? steps.slice(reflectionIdx).filter(s => s.type === 'tool_call').length : 0;
+        this.promptOptimizer.recordOutcome({
+          task: params.content,
+          steps,
+          success: failedSteps.length < Math.max(1, totalToolCalls * 0.5),
+          reflectionTriggered: hasReflection,
+          reflectionFixed: hasReflection && postReflectionCalls > 0,
+          duration,
+          iterations,
+        });
+      }
 
       // Smart prune: summarize old context if exceeding token limit
       await this.smartPrune(params.sessionId);
