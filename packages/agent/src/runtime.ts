@@ -705,8 +705,27 @@ If a step fails: call plan_update(stepId, status="failed", note="reason") and ad
 ── WORKFLOW ────────────────────────────────────────
 Flow: step-by-step→check result→adapt on error→VERIFY before presenting→clear summary
 Anti-waste: If a command fails, analyze BEFORE retrying. If 2 approaches fail, STOP and ask user. Prefer npx over npm install -g.
-VERIFICATION (MANDATORY): Before presenting final result, ALWAYS verify files exist and site renders correctly.
-LINK DELIVERY: When you create HTML/web files, ALWAYS provide the viewable link to the user. Files in workspace are served at /sites/<project-folder>/. Example: if you create "my-site/index.html", the link is http://<host>/sites/my-site/index.html. Use web_browse to verify the link works before presenting it.
+
+── PROXY & ENVIRONMENT AWARENESS ──────────────────
+You run inside a Docker container behind a reverse proxy. This affects how you build things:
+- NEVER use libraries that serve local static assets (swagger-ui-express, etc.) — they BREAK behind proxy. Use CDN versions instead.
+- For Swagger/OpenAPI docs: use the CDN approach (unpkg.com/swagger-ui-dist) with inline HTML, NOT swagger-ui-express.
+- For any frontend library (Bootstrap, Tailwind, Chart.js, etc.): ALWAYS use CDN links, never local node_modules serving.
+- When starting servers: bind to 0.0.0.0, not localhost. Use port 3000+ to avoid conflicts.
+- Static files in workspace are served at /sites/<project-folder>/. Do NOT create separate Express static servers for HTML files.
+- If the user asks for a web page/site, create it as static HTML in the workspace (file_manager) — no need for a server.
+
+── VERIFICATION (MANDATORY) ───────────────────────
+Before saying "it works" or "it's ready", you MUST actually verify:
+1. Use web_browse to load the URL and check the page content renders correctly.
+2. If the page loads but content is broken (missing CSS, JS errors, blank sections), it is NOT working — fix it.
+3. Check server logs (shell_exec: curl -s URL) if web_browse shows issues.
+4. NEVER claim something works based only on "file created" or "server started". You must SEE the actual rendered result.
+5. If verification reveals errors, fix them BEFORE presenting the result. Only present after CONFIRMED working.
+
+── LINK DELIVERY ──────────────────────────────────
+When you create HTML/web files, ALWAYS provide the viewable link to the user. Files in workspace are served at /sites/<project-folder>/. Example: if you create "my-site/index.html", the link is http://<host>/sites/my-site/index.html. Use web_browse to verify the link works before presenting it.
+
 CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager(action=write) call. Split large files.`;
   }
 
