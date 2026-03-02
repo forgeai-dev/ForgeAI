@@ -185,6 +185,7 @@ export class AgentRuntime {
   private progressListeners: Map<string, ProgressListener[]> = new Map();
   private abortedSessions: Set<string> = new Set();
   private contextProvider: (() => string | null) | null = null;
+  private planContextProvider: ((sessionId: string) => string | null) | null = null;
 
   constructor(config: AgentConfig, router?: LLMRouter, usageTracker?: UsageTracker) {
     this.config = config;
@@ -233,6 +234,14 @@ export class AgentRuntime {
    */
   setContextProvider(provider: () => string | null): void {
     this.contextProvider = provider;
+  }
+
+  /**
+   * Set a plan context provider that returns the active plan state for a session.
+   * Called on each tool-loop iteration to inject plan progress into the LLM context.
+   */
+  setPlanContextProvider(provider: (sessionId: string) => string | null): void {
+    this.planContextProvider = provider;
   }
 
   // ─── Cross-Session Memory ────────────────────────────
@@ -680,9 +689,21 @@ ${W ? `── POWERSHELL RULES ────────────────�
 - ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
 - NEVER use shell_exec to make API calls to your OWN system (curl to localhost:18800). Use native tools instead.
 
+── EXECUTION PLANNING ─────────────────────────────
+plan_create: Create a structured execution plan BEFORE starting complex tasks (3+ steps). Helps track progress and prevents losing context.
+plan_update: After completing each step, mark it done (status="completed"). The plan auto-advances to the next step.
+WHEN TO PLAN: websites, multi-file projects, research tasks, automations, anything with 3+ distinct steps.
+WHEN NOT TO PLAN: simple questions, single-command tasks, quick lookups, conversational responses.
+PLANNING FLOW:
+1. Analyze the request → identify steps needed
+2. Call plan_create with goal + steps array
+3. Execute step 1 → call plan_update(stepId="1", status="completed")
+4. Execute step 2 → call plan_update(stepId="2", status="completed")
+5. Continue until all steps done → present final result
+If a step fails: call plan_update(stepId, status="failed", note="reason") and adapt.
+
 ── WORKFLOW ────────────────────────────────────────
 Flow: step-by-step→check result→adapt on error→VERIFY before presenting→clear summary
-Planning: for multi-step tasks, FIRST respond with a brief numbered plan (3-6 lines max), then execute step by step.
 Anti-waste: If a command fails, analyze BEFORE retrying. If 2 approaches fail, STOP and ask user. Prefer npx over npm install -g.
 VERIFICATION (MANDATORY): Before presenting final result, ALWAYS verify files exist and site renders correctly.
 CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager(action=write) call. Split large files.`;
@@ -875,6 +896,7 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
       // Duplicate detection: track last N tool call signatures
       const recentCallSignatures: string[] = [];
       const MAX_CONSECUTIVE_DUPES = 2;
+      let reflectionDone = false;
 
       // Initialize progress tracking
       this.sessionProgress.set(params.sessionId, {
@@ -905,10 +927,22 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
         iterations++;
         this.updateProgress(params.sessionId, { status: 'thinking', iteration: iterations });
 
+        // Inject active plan context if available (refreshed each iteration)
+        const iterationMessages = [...messages, ...toolMessages];
+        if (this.planContextProvider) {
+          const planCtx = this.planContextProvider(params.sessionId);
+          if (planCtx) {
+            iterationMessages.push({
+              role: 'system',
+              content: `--- Active Execution Plan ---\n${planCtx}`,
+            });
+          }
+        }
+
         response = await this.router.chat({
           model: activeModel,
           provider: activeProvider,
-          messages: [...messages, ...toolMessages],
+          messages: iterationMessages,
           tools,
           temperature: this.config.temperature,
           maxTokens: this.config.maxTokens,
@@ -933,9 +967,49 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
           });
         }
 
-        // If no tool calls, we have the final answer
+        // If no tool calls, check if we should reflect before finalizing
         if (!response.toolCalls || response.toolCalls.length === 0) {
-          break;
+          // ─── Reflection Phase ───
+          // For complex tasks (3+ iterations with tool calls), do one reflection pass
+          // to verify work quality. The LLM can make corrections if it finds issues.
+          const toolCallCount = steps.filter(s => s.type === 'tool_call').length;
+          const shouldReflect = !reflectionDone
+            && iterations >= 3
+            && toolCallCount >= 3
+            && !this.abortedSessions.has(params.sessionId);
+
+          if (shouldReflect) {
+            reflectionDone = true;
+            logger.info(`Reflection triggered (iterations=${iterations}, toolCalls=${toolCallCount})`);
+
+            const reflectionStep: AgentStep = {
+              type: 'thinking',
+              message: 'Verifying work quality before presenting final result...',
+              timestamp: new Date().toISOString(),
+            };
+            steps.push(reflectionStep);
+            this.emitProgress(params.sessionId, {
+              type: 'step', sessionId: params.sessionId, agentId: this.config.id,
+              step: reflectionStep, timestamp: Date.now(),
+            });
+
+            // Inject reflection prompt and continue the loop
+            toolMessages.push({
+              role: 'assistant',
+              content: response.content || '',
+            });
+            toolMessages.push({
+              role: 'system',
+              content: `REFLECTION CHECKPOINT — Before presenting your final answer, briefly verify:
+1. Did you complete ALL steps the user requested?
+2. Are there errors or missing pieces in what you produced?
+3. If you created files/sites, did you verify they exist and work?
+If everything is correct, present your final answer now. If you find issues, make the necessary corrections using tool calls.`,
+            });
+            continue; // Re-enter the loop — LLM will either fix issues or give final answer
+          }
+
+          break; // Final answer — no reflection needed or reflection already done
         }
 
         // Stream LLM reasoning text (the content before tool calls = agent's thought process)
@@ -998,101 +1072,153 @@ CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager
           })),
         });
 
-        // Execute each tool and add results
-        for (const toolCall of response.toolCalls) {
-          // ─── Abort check before each tool ───
-          if (this.abortedSessions.has(params.sessionId)) {
-            break; // Exit tool loop; the outer while-loop abort check will handle cleanup
+        // ─── Execute tool calls (parallel when multiple) ───
+        // When the LLM returns 2+ tool calls in one response, they are independent
+        // and can be executed concurrently for significant speed improvements.
+        {
+          // Phase 1: Prepare all tool calls (fast, sequential)
+          interface PreparedCall {
+            toolCall: typeof response.toolCalls[0];
+            cleanArgs: Record<string, unknown>;
+            isTruncated: boolean;
+            isRepaired: boolean;
           }
+          const prepared: PreparedCall[] = [];
+          const truncatedResults: Array<{ toolCall: typeof response.toolCalls[0]; errMsg: string }> = [];
 
-          const args = toolCall.arguments;
-          const isTruncated = !!(args as Record<string, unknown>)['_truncated'];
-          const isRepaired = !!(args as Record<string, unknown>)['_repaired'];
+          for (const toolCall of response.toolCalls) {
+            if (this.abortedSessions.has(params.sessionId)) break;
 
-          // Update progress: currently calling this tool
-          const argPreview = Object.entries(args)
-            .filter(([k]) => k !== '_truncated' && k !== '_repaired')
-            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.substring(0, 50) : JSON.stringify(v).substring(0, 50)}`)
-            .join(', ');
-          this.updateProgress(params.sessionId, {
-            status: 'calling_tool',
-            currentTool: toolCall.name,
-            currentArgs: argPreview,
-          });
+            const args = toolCall.arguments;
+            const isTruncated = !!(args as Record<string, unknown>)['_truncated'];
+            const isRepaired = !!(args as Record<string, unknown>)['_repaired'];
 
-          // Track step: tool_call
-          steps.push({
-            type: 'tool_call',
-            tool: toolCall.name,
-            args,
-            message: `Calling ${toolCall.name}(${Object.keys(args).join(', ')})${isTruncated ? ' [TRUNCATED]' : ''}`,
-            timestamp: new Date().toISOString(),
-          });
-
-          // If args are completely broken (_truncated), skip execution and warn LLM
-          if (isTruncated) {
-            logger.warn(`Skipping ${toolCall.name}: args completely truncated/unparseable`);
-            const errMsg = `ERROR: Your tool call arguments were too large and got truncated by the API. The call was NOT executed. IMPORTANT: Break large content into smaller pieces (max 4000 chars per argument). For large files, write them in multiple append operations or use shell_exec with echo/Set-Content.`;
-            toolMessages.push({ role: 'tool', content: errMsg, tool_call_id: toolCall.id });
+            // Track step: tool_call
             steps.push({
-              type: 'tool_result', tool: toolCall.name, result: errMsg,
-              success: false, duration: 0, message: `${toolCall.name} skipped: truncated args`,
+              type: 'tool_call',
+              tool: toolCall.name,
+              args,
+              message: `Calling ${toolCall.name}(${Object.keys(args).join(', ')})${isTruncated ? ' [TRUNCATED]' : ''}`,
               timestamp: new Date().toISOString(),
             });
-            continue;
+
+            if (isTruncated) {
+              logger.warn(`Skipping ${toolCall.name}: args completely truncated/unparseable`);
+              const errMsg = `ERROR: Your tool call arguments were too large and got truncated by the API. The call was NOT executed. IMPORTANT: Break large content into smaller pieces (max 4000 chars per argument). For large files, write them in multiple append operations or use shell_exec with echo/Set-Content.`;
+              truncatedResults.push({ toolCall, errMsg });
+              steps.push({
+                type: 'tool_result', tool: toolCall.name, result: errMsg,
+                success: false, duration: 0, message: `${toolCall.name} skipped: truncated args`,
+                timestamp: new Date().toISOString(),
+              });
+              continue;
+            }
+
+            const cleanArgs = { ...args } as Record<string, unknown>;
+            delete cleanArgs['_repaired'];
+            if (toolCall.name === 'plan_create' || toolCall.name === 'plan_update') {
+              cleanArgs['_sessionId'] = params.sessionId;
+            }
+
+            prepared.push({ toolCall, cleanArgs, isTruncated, isRepaired });
           }
 
-          // Clean up internal flags before executing
-          const cleanArgs = { ...args };
-          delete (cleanArgs as Record<string, unknown>)['_repaired'];
-
-          const argsSummary = Object.entries(cleanArgs).map(([k, v]) => {
-            const val = typeof v === 'string' ? (v.length > 80 ? v.substring(0, 80) + '...' : v) : JSON.stringify(v);
-            return `${k}=${val}`;
-          }).join(', ');
-          logger.info(`▶ ${toolCall.name}(${argsSummary})`);
-
-          const toolResult = await this.toolExecutor.execute(
-            toolCall.name,
-            cleanArgs,
-            params.userId,
-          );
-
-          let resultContent = compactToolResult(toolCall.name, toolResult.data, toolResult.success, toolResult.error);
-
-          // If args were repaired (truncated but parseable), append warning
-          if (isRepaired && toolResult.success) {
-            resultContent += '\n⚠️ NOTE: Your arguments were truncated by the API but the call still executed. To avoid issues, keep each argument under 4000 chars. For large files, split into multiple writes or use shell_exec.';
+          // Add truncated results to tool messages immediately
+          for (const { toolCall, errMsg } of truncatedResults) {
+            toolMessages.push({ role: 'tool', content: errMsg, tool_call_id: toolCall.id });
           }
 
-          // Track step: tool_result
-          const toolResultStep: AgentStep = {
-            type: 'tool_result',
-            tool: toolCall.name,
-            result: resultContent.substring(0, 500),
-            success: toolResult.success,
-            duration: toolResult.duration,
-            message: toolResult.success
-              ? `${toolCall.name} completed (${toolResult.duration}ms)`
-              : `${toolCall.name} failed: ${toolResult.error}`,
-            timestamp: new Date().toISOString(),
-          };
-          steps.push(toolResultStep);
+          // Phase 2: Execute tools (parallel if 2+, sequential if 1)
+          if (prepared.length > 0) {
+            const isParallel = prepared.length >= 2;
+            if (isParallel) {
+              const toolNames = prepared.map(p => p.toolCall.name).join(', ');
+              logger.info(`▶▶ Parallel execution: ${prepared.length} tools [${toolNames}]`);
+              this.updateProgress(params.sessionId, {
+                status: 'calling_tool',
+                currentTool: `⚡ ${prepared.length} tools in parallel`,
+                currentArgs: toolNames,
+              });
+            }
 
-          // Emit step event for real-time WS streaming
-          this.emitProgress(params.sessionId, {
-            type: 'step', sessionId: params.sessionId, agentId: this.config.id,
-            step: toolResultStep, timestamp: Date.now(),
-          });
+            const executeOne = async (p: PreparedCall) => {
+              const { toolCall, cleanArgs, isRepaired } = p;
+              const argsSummary = Object.entries(cleanArgs)
+                .filter(([k]) => k !== '_sessionId')
+                .map(([k, v]) => {
+                  const val = typeof v === 'string' ? (v.length > 80 ? v.substring(0, 80) + '...' : v) : JSON.stringify(v).substring(0, 80);
+                  return `${k}=${val}`;
+                }).join(', ');
 
-          toolMessages.push({
-            role: 'tool',
-            content: resultContent,
-            tool_call_id: toolCall.id,
-          });
+              if (!isParallel) {
+                this.updateProgress(params.sessionId, {
+                  status: 'calling_tool',
+                  currentTool: toolCall.name,
+                  currentArgs: argsSummary,
+                });
+              }
+              logger.info(`▶ ${toolCall.name}(${argsSummary})`);
 
-          const resultPreview = resultContent.length > 200 ? resultContent.substring(0, 200) + '...' : resultContent;
-          logger.info(`${toolResult.success ? '✓' : '✗'} ${toolCall.name} (${toolResult.duration}ms): ${resultPreview}`);
+              const toolResult = await this.toolExecutor!.execute(toolCall.name, cleanArgs, params.userId);
+
+              let resultContent = compactToolResult(toolCall.name, toolResult.data, toolResult.success, toolResult.error);
+              if (isRepaired && toolResult.success) {
+                resultContent += '\n⚠️ NOTE: Your arguments were truncated by the API but the call still executed. To avoid issues, keep each argument under 4000 chars. For large files, split into multiple writes or use shell_exec.';
+              }
+
+              return { toolCall, toolResult, resultContent };
+            };
+
+            // Execute: parallel or sequential
+            const results = isParallel
+              ? await Promise.allSettled(prepared.map(p => executeOne(p))).then(settled =>
+                  settled.map((s, i) =>
+                    s.status === 'fulfilled'
+                      ? s.value
+                      : {
+                          toolCall: prepared[i].toolCall,
+                          toolResult: { success: false, error: String((s as PromiseRejectedResult).reason), duration: 0 },
+                          resultContent: `ERR:${String((s as PromiseRejectedResult).reason).substring(0, 300)}`,
+                        }
+                  )
+                )
+              : [await executeOne(prepared[0])];
+
+            if (isParallel) {
+              const successCount = results.filter(r => r.toolResult.success).length;
+              logger.info(`◀◀ Parallel complete: ${successCount}/${results.length} succeeded`);
+            }
+
+            // Phase 3: Process results in order (for correct message sequence)
+            for (const { toolCall, toolResult, resultContent } of results) {
+              const toolResultStep: AgentStep = {
+                type: 'tool_result',
+                tool: toolCall.name,
+                result: resultContent.substring(0, 500),
+                success: toolResult.success,
+                duration: toolResult.duration,
+                message: toolResult.success
+                  ? `${toolCall.name} completed (${toolResult.duration}ms)`
+                  : `${toolCall.name} failed: ${toolResult.error}`,
+                timestamp: new Date().toISOString(),
+              };
+              steps.push(toolResultStep);
+
+              this.emitProgress(params.sessionId, {
+                type: 'step', sessionId: params.sessionId, agentId: this.config.id,
+                step: toolResultStep, timestamp: Date.now(),
+              });
+
+              toolMessages.push({
+                role: 'tool',
+                content: resultContent,
+                tool_call_id: toolCall.id,
+              });
+
+              const resultPreview = resultContent.length > 200 ? resultContent.substring(0, 200) + '...' : resultContent;
+              logger.info(`${toolResult.success ? '✓' : '✗'} ${toolCall.name} (${toolResult.duration}ms): ${resultPreview}`);
+            }
+          }
         }
       }
 

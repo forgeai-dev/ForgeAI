@@ -1,6 +1,6 @@
 ## Description
 
-Built-in Cloudflare bypass mechanism for the agent's web browsing tools. Detects CF challenges in HTTP-only requests (web_browse/Cheerio), automatically falls back to Puppeteer to solve the challenge, caches the `cf_clearance` cookie, and reuses it for subsequent requests. No external services or Docker containers needed.
+Major agent intelligence upgrade: connects the AutoPlanner to the runtime for structured task execution, enables parallel tool execution for speed, and adds automatic reflection/verification for quality assurance.
 
 ## Type of Change
 
@@ -13,60 +13,39 @@ Built-in Cloudflare bypass mechanism for the agent's web browsing tools. Detects
 
 ## Changes Made
 
-### 1. CF Bypass Utility (`cf-bypass.ts`)
-- `packages/tools/src/utils/cf-bypass.ts`: Core utility with:
-  - `isCloudflareChallenge()` — detects CF challenges via HTML patterns + response headers
-  - `CFCookieCache` — in-memory cache (domain → cf_clearance cookie, 25min TTL, max 200 entries)
-  - `solveCFChallenge()` — launches stealth Puppeteer, navigates to CF-protected URL, polls for cf_clearance cookie (up to 30s), caches result
-  - `buildCFHeaders()` — builds fetch headers with cached CF cookies for a domain
-  - `extractDomain()` — URL → hostname helper
+### 1. AutoPlanner Integration (`plan_create` / `plan_update` tools)
+- New `packages/tools/src/tools/plan-tools.ts`: `plan_create` and `plan_update` tools with per-session plan store
+- Agent creates structured plans before complex tasks (3+ steps)
+- Plan context injected into every LLM iteration via `planContextProvider`
+- Real-time plan progress tracking (step status: pending/in_progress/completed/failed/skipped)
+- Auto-advances to next step on completion; max 15 steps per plan
+- System prompt updated with EXECUTION PLANNING instructions
 
-### 2. web-browser.ts (Cheerio) Integration
-- Before fetch: injects cached CF cookies (cookie + matching User-Agent) if available
-- After fetch: detects CF challenge on 403/503 responses using `isCloudflareChallenge()`
-- On CF detection: launches Puppeteer via `solveCFWithPuppeteer()`, retries the fetch with solved cookies
-- Response processing refactored into `processResponse()` method (supports `cfBypassed` flag)
-- Loop-prevention via `cfBypassAttempted` Set (per-domain, 60s cooldown)
+### 2. Parallel Tool Execution
+- When LLM returns 2+ tool calls in one response, they execute concurrently via `Promise.allSettled`
+- Single tool calls remain sequential (no overhead)
+- Graceful error handling: rejected promises produce error results without crashing
+- Progress shows "N tools in parallel" during concurrent execution
+- Results processed in order for correct LLM message sequencing
 
-### 3. puppeteer-browser.ts Integration
-- After every `navigateAction`, calls `handleCFChallenge()` to check if page is a CF challenge
-- If challenge detected: polls for cf_clearance cookie (up to 30s), caches it via `getCFCookieCache()`
-- Cached cookies are automatically available for subsequent `web_browse` (Cheerio) requests
-- Returns `cfBypassed: true` and `cfDomain` in navigation result when bypass occurs
-
-### 4. Package Exports
-- `packages/tools/src/index.ts`: Exports all CF bypass functions and types
-
-## How to Test
-
-1. `pnpm -r build` — all packages compile cleanly
-2. **web_browse (Cheerio)**: Request a CF-protected site → should detect challenge, fall back to Puppeteer, solve it, and return content with `cfBypassed: true`
-3. **browser (Puppeteer)**: Navigate to a CF-protected site → should auto-wait for challenge resolution and cache the cookie
-4. **Cookie reuse**: After Puppeteer solves once, subsequent `web_browse` requests to the same domain should use cached cookies (no Puppeteer needed)
-5. **Cache expiry**: After 25 minutes, cached cookies expire and next request triggers a fresh solve
-
-## Related Issue
-
-N/A
-
-## Screenshots
-
-N/A
+### 3. Reflection/Verification Step
+- After complex tasks (3+ iterations, 3+ tool calls), triggers one reflection pass
+- LLM verifies: all steps completed? errors? files exist?
+- If issues found, LLM can make corrective tool calls automatically
+- `reflectionDone` flag prevents infinite reflection loops
+- Emits "Verifying work quality..." step for real-time UI feedback
 
 ## Checklist
 
-- [x] Code builds without errors (`pnpm -r build`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Documentation updated (if needed)
-
----
+- [x] Full build passes (`pnpm -r build`)
 
 ### Files Changed
 
 | File | Changes |
 |------|---------|
-| `packages/tools/src/utils/cf-bypass.ts` | **NEW** — CF detection, cookie cache, Puppeteer solver |
-| `packages/tools/src/tools/web-browser.ts` | CF detection + auto-fallback to Puppeteer, processResponse refactor |
-| `packages/tools/src/tools/puppeteer-browser.ts` | handleCFChallenge after navigation, cookie caching |
-| `packages/tools/src/index.ts` | Export CF bypass utilities and types |
+| `packages/tools/src/tools/plan-tools.ts` | NEW: plan_create, plan_update tools + session plan store + buildPlanContext |
+| `packages/tools/src/index.ts` | Export plan tools + register in createDefaultToolRegistry |
+| `packages/agent/src/runtime.ts` | planContextProvider, _sessionId injection, parallel execution, reflection step, system prompt update |
+| `packages/core/src/gateway/chat-routes.ts` | Import buildPlanContext, wire as planContextProvider on default agent |

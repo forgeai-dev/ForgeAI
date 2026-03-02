@@ -4,7 +4,7 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
@@ -1436,6 +1436,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       return lines.join('\n');
     });
     logger.info('Dynamic context provider attached to default agent');
+
+    // Wire plan context provider — injects active plan state into each LLM iteration
+    defaultAgent.setPlanContextProvider((sessionId: string) => {
+      return buildPlanContext(sessionId);
+    });
+    logger.info('Plan context provider attached to default agent');
   }
 
   // ─── REST API: Chat ────────────────────────────────
