@@ -130,10 +130,30 @@ export class PlanCreateTool extends BaseTool {
 
     let stepDescriptions: string[];
     try {
-      stepDescriptions = JSON.parse(stepsRaw);
+      // Handle multiple input formats from LLMs:
+      // 1. Already an array (if runtime passed parsed JSON)
+      // 2. JSON string: '["step1", "step2"]'
+      // 3. Comma-separated: "step1, step2, step3"
+      // 4. Newline-separated: "step1\nstep2\nstep3"
+      if (Array.isArray(stepsRaw)) {
+        stepDescriptions = (stepsRaw as unknown as string[]).map(s => String(s).trim()).filter(Boolean);
+      } else if (typeof stepsRaw === 'string') {
+        const trimmed = stepsRaw.trim();
+        if (trimmed.startsWith('[')) {
+          stepDescriptions = JSON.parse(trimmed);
+        } else if (trimmed.includes('\n')) {
+          stepDescriptions = trimmed.split('\n').map(s => s.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean);
+        } else {
+          stepDescriptions = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      } else {
+        throw new Error('steps must be an array or string');
+      }
       if (!Array.isArray(stepDescriptions) || stepDescriptions.length === 0) {
         throw new Error('steps must be a non-empty array');
       }
+      // Ensure all items are strings
+      stepDescriptions = stepDescriptions.map(s => String(s).trim()).filter(Boolean);
     } catch (e) {
       return { success: false, error: `Invalid steps format: ${e instanceof Error ? e.message : 'must be a JSON array of strings'}`, duration: Date.now() - start };
     }
