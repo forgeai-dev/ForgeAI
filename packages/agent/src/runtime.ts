@@ -644,25 +644,36 @@ desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
 image_generator: Generate images using AI (Leonardo AI, Stable Diffusion). Requires API key configured in Dashboard → Settings.
  Use for: creating illustrations, logos, concept art, thumbnails, etc.
 
-── TASK DELEGATION (SUB-AGENTS) ───────────────────
-agent_delegate: Create a temporary specialist sub-agent to handle a focused task. The sub-agent has ALL your tools and runs independently.
-WHEN TO DELEGATE:
-- Task has 2+ INDEPENDENT parts that can run in parallel (e.g., frontend + backend, research A + research B)
-- Each part is self-contained and complex enough (3+ steps) to benefit from focused context
-- You need specialist focus (e.g., "CSS Designer" for styling, "Python Engineer" for backend)
-WHEN NOT TO DELEGATE:
-- Simple tasks, single-step operations, quick questions
-- Tasks where parts depend on each other's output (sequential work)
-- Tasks with fewer than 3 steps total
-HOW TO DELEGATE:
-1. Break the task into independent parts
-2. Call agent_delegate for EACH part in THE SAME response (they run in parallel automatically!)
-3. Wait for all results
-4. Review, consolidate, verify, and present to user
-CRITICAL: Include ALL necessary context in the task description — the sub-agent has NO access to your conversation history.
-EXAMPLE: User asks "Create a React frontend and Node.js API"
-→ Call agent_delegate(role="Frontend React Developer", task="Create React app with...") AND agent_delegate(role="Backend Node.js Engineer", task="Create Express API with...") in the SAME response
-→ Both run simultaneously → you get results from both → consolidate and verify
+── FORGE TEAMS (COORDINATED AGENT TEAMS) ─────────
+forge_team: Create a coordinated team of specialist agents that work together on complex projects.
+Unlike agent_delegate (isolated parallel workers), Forge Teams have:
+- DEPENDENCY GRAPH: Task B waits for Task A, then receives A's output as context
+- SHARED CONTEXT: Workers build on each other's results
+- PARALLEL + SEQUENTIAL: Independent tasks run simultaneously, dependent tasks wait
+WHEN TO USE forge_team:
+- Complex multi-part projects with dependencies (frontend depends on API design, review depends on both)
+- Projects needing 3+ specialists that must coordinate (e.g., designer + developer + reviewer)
+- Full-stack apps, research projects with analysis + synthesis, multi-step pipelines
+WHEN TO USE agent_delegate instead:
+- Simple independent tasks (no dependencies between them)
+- Only 1-2 workers needed
+- Quick parallel work without coordination
+HOW TO USE:
+1. Break project into tasks with clear dependencies
+2. Define each task: id, role, description (DETAILED and self-contained), dependencies (array of upstream task IDs)
+3. Call forge_team with name + tasks JSON array
+4. Review consolidated results, verify, present to user
+EXAMPLE: User asks "Create a full-stack app with landing page and API"
+→ forge_team(name="Full-Stack App Team", tasks=[
+  {"id":"design","role":"UI Designer","description":"Create modern dark theme landing page HTML with...","dependencies":[]},
+  {"id":"api","role":"Backend Engineer","description":"Create Flask REST API that returns products JSON...","dependencies":[]},
+  {"id":"integrate","role":"Integration Engineer","description":"Connect the frontend to the API, add fetch calls...","dependencies":["design","api"]}
+])
+→ design + api run in PARALLEL → integrate waits for both → you get integrated results
+
+── TASK DELEGATION (SIMPLE SUB-AGENTS) ────────────
+agent_delegate: For quick parallel work without dependencies. Each sub-agent works in isolation.
+Use for: 2 independent tasks that don't need each other's output. Call multiple times in ONE response for parallel execution.
 
 ── MULTI-AGENT & SESSIONS ─────────────────────────
 sessions_list: List all available agents and their active sessions. Discover other agents you can communicate with.
@@ -696,7 +707,7 @@ NEVER tell the user you "can't" do something — find another way.
 - Browser/Chromium issues: clean locks, kill stale processes, retry.
 - Port conflicts: kill specific PID only (fuser -k PORT/tcp).
 - Tool returns error: read the error, fix the cause, retry. Do NOT give up after one failure.
-- Package missing: install it. You have root access.
+- Package missing: install it. You have root access. Python 3 + pip + venv are pre-installed.
 - If a tool is completely broken, use alternative tools.
 CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway runs on Node.js — killing node kills the Gateway!
 
@@ -1174,7 +1185,7 @@ If everything is correct, present your final answer now. If you find issues, mak
 
             const cleanArgs = { ...args } as Record<string, unknown>;
             delete cleanArgs['_repaired'];
-            if (toolCall.name === 'plan_create' || toolCall.name === 'plan_update' || toolCall.name === 'agent_delegate') {
+            if (toolCall.name === 'plan_create' || toolCall.name === 'plan_update' || toolCall.name === 'agent_delegate' || toolCall.name === 'forge_team') {
               cleanArgs['_sessionId'] = params.sessionId;
             }
 

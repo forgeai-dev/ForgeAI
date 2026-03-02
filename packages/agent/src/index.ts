@@ -30,5 +30,7 @@ export { AutoPlanner, createAutoPlanner } from './auto-planner.js';
 export type { Plan, PlanStep, PlannerConfig } from './auto-planner.js';
 export { PromptOptimizer, createPromptOptimizer } from './prompt-optimizer.js';
 export type { TaskCategory, SuccessPattern, FailurePattern, CategoryStats } from './prompt-optimizer.js';
+export { ForgeTeamEngine, createForgeTeamEngine, getActiveTeams, getActiveTeam } from './forge-team.js';
+export type { TeamTask, TeamWorker, ActiveTeam, TeamResult } from './forge-team.js';
 export { WakeWordManager, createWakeWordManager } from './wake-word.js';
 export type { WakeWordEventHandler, WakeWordDetector } from './wake-word.js';
