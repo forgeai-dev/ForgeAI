@@ -272,9 +272,24 @@ The dashboard is a full-featured React 19 SPA served directly by the Gateway. No
 | **Canvas** | ForgeCanvas: live visual artifacts (HTML, React, SVG, Mermaid, Charts, Markdown, Code) rendered in sandboxed iframes with bidirectional agent↔artifact interaction |
 | **Recordings** | Session Recording & Replay: record full agent sessions, timeline player with play/pause/scrub, step-by-step visualization (messages, tool calls, thinking, progress) |
 
-### 🖥️ Electron Desktop App
+### 🖥️ Desktop Apps
 
-Native desktop wrapper (`packages/desktop`) for Windows, macOS, and Linux:
+ForgeAI offers **two desktop applications** with different purposes:
+
+| | **Desktop App** (`packages/desktop`) | **Companion** (`packages/companion`) |
+|:--|:--|:--|
+| **Framework** | Electron | Tauri 2 + React + Rust |
+| **Purpose** | Lightweight wrapper for the Dashboard — opens it as a native desktop window instead of a browser tab | Smart client that **connects to the Gateway** and lets the AI control your Windows PC (desktop automation, voice, file management) |
+| **Platforms** | Windows, macOS, Linux | Windows 10/11 only |
+| **Requires Gateway?** | No — embeds the Dashboard UI | Yes — pairs with a Gateway via WebSocket |
+| **Key features** | System tray, global hotkeys, auto-update, startup on boot | Pairing, voice mode, desktop automation, dual-environment routing, safety system |
+| **When to use** | You want a native app to access the Dashboard without opening a browser | You want the AI to interact with your Windows PC remotely (e.g., Gateway on VPS, Companion on your desktop) |
+
+---
+
+#### 📦 Desktop App (Electron) — Dashboard Wrapper
+
+Native desktop wrapper (`packages/desktop`) that packages the ForgeAI Dashboard as a standalone application for Windows, macOS, and Linux:
 - **System Tray** — runs in background, double-click to show, context menu with quick actions
 - **Global Hotkeys** — `Ctrl+Shift+F` toggle window, `Ctrl+Shift+C` quick chat
 - **Native Notifications** — OS-level notifications for agent events
@@ -284,9 +299,9 @@ Native desktop wrapper (`packages/desktop`) for Windows, macOS, and Linux:
 - **Minimize to Tray** — close button minimizes instead of quitting
 - **Persistent Settings** — gateway URL, window bounds, preferences stored in user data
 
-### 🔥 ForgeAI Companion (Windows)
+#### 🔥 ForgeAI Companion (Tauri) — AI Desktop Controller
 
-Lightweight native desktop client (`packages/companion`) built with **Tauri 2 + React + Rust**. Connects to any ForgeAI Gateway (local or remote) and lets you interact with the AI directly from your desktop.
+Lightweight native desktop client (`packages/companion`) built with **Tauri 2 + React + Rust**. Connects to any ForgeAI Gateway (local or remote) and lets the AI agent **control your Windows desktop** — creating files, running commands, taking screenshots, and more.
 
 > **⚠️ Windows exclusive** — requires Windows 10/11 (x64). The Companion connects to the Gateway via HTTP/WebSocket, so the Gateway itself can run on any platform (Linux VPS, Docker, etc.).
 
