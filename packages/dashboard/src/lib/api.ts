@@ -109,6 +109,37 @@ export interface AgentInfo {
   createdAt: string;
 }
 
+export interface DelegationRecord {
+  id: string;
+  role: string;
+  task: string;
+  result: string;
+  model: string;
+  provider: string;
+  parentSessionId: string;
+  status: 'completed' | 'failed';
+  duration: number;
+  steps: number;
+  tokens: number;
+  error?: string;
+  createdAt: number;
+  completedAt: number;
+  source: 'delegate' | 'team';
+}
+
+export interface TeamInfo {
+  id: string;
+  name: string;
+  type: string;
+  status: 'planning' | 'running' | 'completed' | 'failed';
+  workers: Array<{ taskId: string; role: string; status: string }>;
+  createdAt: number;
+  completedAt?: number;
+  taskCount: number;
+  completedCount: number;
+  failedCount: number;
+}
+
 export interface PairingCode {
   code: string;
   createdAt: string;
@@ -175,7 +206,10 @@ export const api = {
   stopSession: (sessionId: string) =>
     request<{ success: boolean; sessionId: string }>('/api/chat/stop', { method: 'POST', body: JSON.stringify({ sessionId }) }),
   // Multi-agent
-  getAgents: () => request<{ agents: AgentInfo[]; bindings: unknown[] }>('/api/agents'),
+  getAgents: () => request<{ agents: AgentInfo[]; bindings: unknown[]; teams: TeamInfo[] }>('/api/agents'),
+  getDelegations: () => request<{ delegations: DelegationRecord[] }>('/api/delegations'),
+  deleteDelegation: (id: string) => request<{ success: boolean }>(`/api/delegations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clearDelegations: () => request<{ success: boolean; cleared: number }>('/api/delegations', { method: 'DELETE' }),
   addAgent: (agent: { id: string; name: string; model?: string; provider?: string; persona?: string }) =>
     request<{ success: boolean; agent: AgentInfo }>('/api/agents', { method: 'POST', body: JSON.stringify(agent) }),
   removeAgent: (id: string) => request<{ success: boolean }>(`/api/agents/${id}`, { method: 'DELETE' }),

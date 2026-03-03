@@ -15,6 +15,28 @@ import { MemoryManager } from './memory-manager.js';
 
 const logger = createLogger('Agent:Manager');
 
+// ─── Delegation History ────────────────────────────────
+
+export interface DelegationRecord {
+  id: string;
+  role: string;
+  task: string;
+  result: string;
+  model: string;
+  provider: string;
+  parentSessionId: string;
+  status: 'completed' | 'failed';
+  duration: number;
+  steps: number;
+  tokens: number;
+  error?: string;
+  createdAt: number;
+  completedAt: number;
+  source: 'delegate' | 'team';
+}
+
+const MAX_DELEGATION_HISTORY = 100;
+
 /**
  * AgentManager — manages multiple AgentRuntime instances.
  * Multi-agent architecture:
@@ -33,6 +55,7 @@ export class AgentManager {
   private toolExecutor: ToolExecutor | null = null;
   private memoryManager: MemoryManager | null = null;
   private createdAt: Map<string, Date> = new Map();
+  private delegationHistory: DelegationRecord[] = [];
 
   constructor(router: LLMRouter, usageTracker?: UsageTracker) {
     this.router = router;
@@ -563,6 +586,14 @@ export class AgentManager {
       runtime.setPlanContextProvider((defaultAgent as any).planContextProvider);
     }
 
+    // Track result for delegation history
+    let delegateResult: string = '';
+    let delegateStatus: 'completed' | 'failed' = 'completed';
+    let delegateSteps = 0;
+    let delegateTokens = 0;
+    let delegateError: string | undefined;
+    let delegateModel = def.model ?? 'unknown';
+
     try {
       const result = await runtime.processMessage({
         sessionId,
@@ -571,11 +602,18 @@ export class AgentManager {
         channelType: 'delegation',
       });
 
+      delegateResult = result.content.substring(0, 1000);
+      delegateSteps = result.steps?.length ?? 0;
+      delegateTokens = result.usage.totalTokens;
+      delegateModel = result.model;
+      delegateStatus = result.blocked ? 'failed' : 'completed';
+      delegateError = result.blocked ? result.blockReason : undefined;
+
       logger.info(`Sub-agent "${params.role}" completed`, {
         delegateId,
         duration: Date.now() - start,
-        steps: result.steps?.length ?? 0,
-        tokens: result.usage.totalTokens,
+        steps: delegateSteps,
+        tokens: delegateTokens,
       });
 
       return {
@@ -584,11 +622,13 @@ export class AgentManager {
         role: params.role,
         model: result.model,
         duration: Date.now() - start,
-        steps: result.steps?.length ?? 0,
-        tokens: result.usage.totalTokens,
-        error: result.blocked ? result.blockReason : undefined,
+        steps: delegateSteps,
+        tokens: delegateTokens,
+        error: delegateError,
       };
     } catch (error) {
+      delegateStatus = 'failed';
+      delegateError = error instanceof Error ? error.message : String(error);
       logger.error(`Sub-agent "${params.role}" failed`, { delegateId, error });
       return {
         success: false,
@@ -597,15 +637,72 @@ export class AgentManager {
         model: def.model ?? 'unknown',
         duration: Date.now() - start,
         steps: 0,
-        error: error instanceof Error ? error.message : String(error),
+        error: delegateError,
       };
     } finally {
-      // Cleanup: remove temp agent and its data
+      // Save to delegation history before cleanup
+      this.addDelegationRecord({
+        id: delegateId,
+        role: params.role,
+        task: params.task.substring(0, 500),
+        result: delegateResult,
+        model: delegateModel,
+        provider: (def.provider ?? 'openai') as string,
+        parentSessionId: params.parentSessionId,
+        status: delegateStatus,
+        duration: Date.now() - start,
+        steps: delegateSteps,
+        tokens: delegateTokens,
+        error: delegateError,
+        createdAt: start,
+        completedAt: Date.now(),
+        source: 'delegate',
+      });
+
+      // Cleanup: remove temp agent runtime
       this.agents.delete(delegateId);
       this.agentDefs.delete(delegateId);
       this.createdAt.delete(delegateId);
-      logger.info(`Sub-agent "${params.role}" cleaned up`, { delegateId });
+      logger.info(`Sub-agent "${params.role}" saved to history & cleaned up`, { delegateId });
     }
+  }
+
+  // ─── Delegation History Management ────────────────────
+
+  /**
+   * Add a delegation record to history.
+   */
+  addDelegationRecord(record: DelegationRecord): void {
+    this.delegationHistory.unshift(record);
+    // Cap history size
+    if (this.delegationHistory.length > MAX_DELEGATION_HISTORY) {
+      this.delegationHistory = this.delegationHistory.slice(0, MAX_DELEGATION_HISTORY);
+    }
+  }
+
+  /**
+   * Get delegation history.
+   */
+  getDelegationHistory(): DelegationRecord[] {
+    return this.delegationHistory;
+  }
+
+  /**
+   * Remove a specific delegation record.
+   */
+  removeDelegation(id: string): boolean {
+    const before = this.delegationHistory.length;
+    this.delegationHistory = this.delegationHistory.filter(d => d.id !== id);
+    return this.delegationHistory.length < before;
+  }
+
+  /**
+   * Clear all delegation history.
+   */
+  clearDelegationHistory(): number {
+    const count = this.delegationHistory.length;
+    this.delegationHistory = [];
+    return count;
   }
 }
 

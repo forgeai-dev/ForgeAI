@@ -1,6 +1,7 @@
 export { AgentRuntime, createAgentRuntime } from './runtime.js';
 export type { AgentMessage, AgentResult, AgentStep, SessionInfo, SessionProgress, ToolExecutor, AgentProgressEvent, ProgressListener } from './runtime.js';
 export { AgentManager, createAgentManager } from './agent-manager.js';
+export type { DelegationRecord } from './agent-manager.js';
 export { LLMRouter, createLLMRouter } from './router.js';
 export type { FailoverEvent } from './router.js';
 export { loadWorkspacePrompts, getWorkspacePromptFiles } from './workspace-prompts.js';

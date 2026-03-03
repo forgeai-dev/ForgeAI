@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Plus, Trash2, Pencil, Users, Star, Cpu, X } from 'lucide-react';
-import { api, type AgentInfo } from '@/lib/api';
+import { Bot, Plus, Trash2, Pencil, Users, Star, Cpu, X, GitBranch, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { api, type AgentInfo, type DelegationRecord, type TeamInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface NewAgentForm {
@@ -15,6 +15,8 @@ const EMPTY_FORM: NewAgentForm = { id: '', name: '', persona: '', model: '', pro
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [teams, setTeams] = useState<TeamInfo[]>([]);
+  const [delegations, setDelegations] = useState<DelegationRecord[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<NewAgentForm>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -22,10 +24,16 @@ export function AgentsPage() {
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(() => {
-    api.getAgents().then(d => setAgents(d.agents)).catch(() => {});
+    api.getAgents().then(d => { setAgents(d.agents); setTeams(d.teams ?? []); }).catch(() => {});
+    api.getDelegations().then(d => setDelegations(d.delegations ?? [])).catch(() => {});
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // Auto-refresh every 10s for live team status
+  useEffect(() => {
+    const t = setInterval(refresh, 10000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
   const handleCreate = async () => {
     if (!form.id.trim() || !form.name.trim()) {
@@ -303,6 +311,143 @@ export function AgentsPage() {
         )}
       </div>
 
+      {/* ─── Forge Teams ─────────────────────────── */}
+      {teams.length > 0 && (
+        <div className="mt-10">
+          <div className="flex items-center gap-2 mb-4">
+            <GitBranch className="w-5 h-5 text-cyan-400" />
+            <h2 className="text-lg font-bold text-white">Forge Teams</h2>
+            <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-medium">
+              {teams.length}
+            </span>
+          </div>
+          <div className="grid gap-3">
+            {teams.map(team => (
+              <div key={team.id} className="p-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-white font-semibold text-sm">{team.name}</h3>
+                    <span className={cn(
+                      'px-2 py-0.5 rounded-full text-[10px] font-medium',
+                      team.status === 'running' ? 'bg-blue-500/15 text-blue-400' :
+                      team.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' :
+                      team.status === 'failed' ? 'bg-red-500/15 text-red-400' :
+                      'bg-zinc-500/15 text-zinc-400'
+                    )}>
+                      {team.status === 'running' && <Loader2 className="w-3 h-3 inline mr-1 animate-spin" />}
+                      {team.status}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500">
+                    {team.completedCount}/{team.taskCount} tasks
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {team.workers.map(w => (
+                    <div key={w.taskId} className={cn(
+                      'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs',
+                      w.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
+                      w.status === 'running' ? 'bg-blue-500/10 text-blue-400' :
+                      w.status === 'failed' ? 'bg-red-500/10 text-red-400' :
+                      'bg-zinc-700/40 text-zinc-400'
+                    )}>
+                      {w.status === 'completed' ? <CheckCircle2 className="w-3 h-3" /> :
+                       w.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> :
+                       w.status === 'failed' ? <XCircle className="w-3 h-3" /> :
+                       <Clock className="w-3 h-3" />}
+                      {w.role}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Sub-Agentes & Delegações ────────────── */}
+      {delegations.length > 0 && (
+        <div className="mt-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-amber-400" />
+              <h2 className="text-lg font-bold text-white">Sub-Agentes & Delegações</h2>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-medium">
+                {delegations.length}
+              </span>
+            </div>
+            <button
+              onClick={async () => {
+                if (!confirm('Limpar todo o histórico de delegações?')) return;
+                await api.clearDelegations();
+                refresh();
+              }}
+              title="Limpar histórico"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Limpar
+            </button>
+          </div>
+          <div className="grid gap-3">
+            {delegations.map(d => (
+              <div key={d.id} className={cn(
+                'p-4 rounded-xl border',
+                d.status === 'completed' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'
+              )}>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Bot className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      <h3 className="text-white font-semibold text-sm truncate">{d.role}</h3>
+                      <span className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0',
+                        d.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                      )}>
+                        {d.status === 'completed' ? <CheckCircle2 className="w-3 h-3 inline mr-0.5" /> : <AlertCircle className="w-3 h-3 inline mr-0.5" />}
+                        {d.status}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-zinc-700/40 text-zinc-500 text-[10px]">
+                        {d.source}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{d.task}</p>
+                    {d.result && (
+                      <p className="text-xs text-zinc-500 mb-2 line-clamp-2 italic">{d.result}</p>
+                    )}
+                    <div className="flex items-center gap-4 text-[10px] text-zinc-500">
+                      <span className="flex items-center gap-1">
+                        <Cpu className="w-3 h-3" />
+                        {d.provider}/{d.model}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {Math.round(d.duration / 1000)}s
+                      </span>
+                      <span>{d.steps} steps</span>
+                      <span>{d.tokens.toLocaleString()} tokens</span>
+                      <span>{new Date(d.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => { await api.deleteDelegation(d.id); refresh(); }}
+                    title="Remover"
+                    className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0 ml-2"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {d.error && (
+                  <div className="mt-2 px-2 py-1 rounded-lg bg-red-500/10 text-red-400 text-[10px]">
+                    {d.error}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Info */}
       <div className="mt-8 p-4 rounded-xl border border-zinc-800 bg-zinc-900/50">
         <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Como funciona</h4>
@@ -311,6 +456,8 @@ export function AgentsPage() {
           <li>No Chat, selecione qual agente deve responder usando o seletor acima do input</li>
           <li>Agentes podem se comunicar entre si via session tools (sessions_list, sessions_send)</li>
           <li>O agente DEFAULT é usado quando nenhum outro é especificado</li>
+          <li><strong className="text-zinc-400">Forge Teams</strong>: equipes coordenadas de sub-agentes com grafos de dependência</li>
+          <li><strong className="text-zinc-400">Delegações</strong>: histórico de tarefas delegadas a sub-agentes (agent_delegate + forge_team)</li>
         </ul>
       </div>
     </div>

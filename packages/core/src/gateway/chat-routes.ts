@@ -2840,6 +2840,33 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { teams: getActiveTeams() };
   });
 
+  // ─── Delegation History ─────────────────────────────
+
+  // GET /api/delegations — list delegation history
+  app.get('/api/delegations', async () => {
+    if (!agentManager) return { delegations: [] };
+    return { delegations: agentManager.getDelegationHistory() };
+  });
+
+  // DELETE /api/delegations/:id — remove a specific delegation record
+  app.delete('/api/delegations/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!agentManager) { reply.status(503).send({ error: 'Agent manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const removed = agentManager.removeDelegation(id);
+    if (!removed) {
+      reply.status(404).send({ error: `Delegation '${id}' not found` });
+      return;
+    }
+    return { success: true };
+  });
+
+  // DELETE /api/delegations — clear all delegation history
+  app.delete('/api/delegations', async () => {
+    if (!agentManager) return { error: 'Agent manager not ready' };
+    const count = agentManager.clearDelegationHistory();
+    return { success: true, cleared: count };
+  });
+
   // POST /api/agents — add a new agent
   app.post('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!agentManager) { reply.status(503).send({ error: 'Agent manager not ready' }); return; }

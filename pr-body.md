@@ -1,33 +1,33 @@
-## Problem
+## Summary
 
-When the agent creates dynamic apps, it starts them with a fragile background process that dies easily. When the app crashes, the proxy returns raw JSON exposing internal tool names, which then triggers Prompt Guard false positives when users paste the error back.
+Sub-Agent Visibility & Persistence (Phase 1 + 2): Delegation history store, API endpoints, Forge Teams + Delegations rendered in Agents dashboard.
 
-## Solution
+## Changes
 
-### AppManager (app-manager.ts)
-- Full process lifecycle: spawn, monitor, auto-restart with exponential backoff (up to 5 restarts)
-- Health checks every 30s (HTTP HEAD probe on app port)
-- Graceful shutdown: SIGTERM then SIGKILL after 5s
-- Per-app status tracking: running/stopped/crashed/starting
+### Phase 1: DelegationHistory Store (`packages/agent/src/agent-manager.ts`)
+- **DelegationRecord interface**: id, role, task, result, model, provider, status, duration, steps, tokens, timestamps, source
+- **delegateTask() now persists results** before cleanup — captures content, steps, tokens, error status
+- **History management methods**: `addDelegationRecord()`, `getDelegationHistory()`, `removeDelegation()`, `clearDelegationHistory()`
+- Capped at 100 records (FIFO)
 
-### Beautiful Offline Page
-- Dark-themed HTML error page replaces raw JSON when app is down
-- Auto-refreshes every 15s, no internal details exposed
+### Phase 1: API Endpoints (`packages/core/src/gateway/chat-routes.ts`)
+- `GET /api/delegations` — list all delegation history
+- `DELETE /api/delegations/:id` — remove specific record
+- `DELETE /api/delegations` — clear all history
 
-### Managed App Registration
-- POST /api/apps/register now accepts cwd, command, args to start as managed process
-- New endpoints: restart, stop, list managed apps
-- Registry now includes status, PID, restart count, last health check
+### Phase 2: Dashboard UI (`packages/dashboard/src/pages/Agents.tsx`)
+- **Forge Teams section**: shows active teams with worker status badges (running/completed/failed/pending)
+- **Sub-Agentes & Delegações section**: delegation history cards with role, task, result preview, model, duration, tokens, timestamps
+- Individual delete + bulk clear for delegations
+- Auto-refresh every 10s for live team status
 
-### System Prompt Updates
-- Agent instructed to use managed registration over background processes
-- Must verify app URL works before presenting to user
+### Dashboard API Types (`packages/dashboard/src/lib/api.ts`)
+- Added `DelegationRecord`, `TeamInfo` interfaces
+- Added `getDelegations()`, `deleteDelegation()`, `clearDelegations()` API methods
+- Updated `getAgents()` return type to include `teams`
 
-### Files Changed
-
-| File | Changes |
-|------|---------|
-| `packages/core/src/gateway/app-manager.ts` | NEW: AppManager class + generateAppDownPage |
-| `packages/core/src/gateway/chat-routes.ts` | Managed registration, control endpoints, HTML error page |
-| `packages/core/src/gateway/server.ts` | Subdomain proxy uses HTML error page |
-| `packages/agent/src/runtime.ts` | System prompt with managed app instructions |
+## Testing
+```
+npm run build  # All packages compile
+npx vitest run tests/security.test.ts tests/agent.test.ts  # 131 tests pass
+```
