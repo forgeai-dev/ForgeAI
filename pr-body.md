@@ -1,45 +1,37 @@
 ## Description
 
-New `app_register` tool: internal tool for the agent to register and start dynamic apps without relying on HTTP API authentication. Replaces the fragile `curl POST /api/apps/register` pattern.
+Condense the agent system prompt by ~60% (261 lines removed, 67 added) to reduce token usage per LLM iteration, directly cutting latency and cost. Inspired by OpenClaw's minimal prompt approach. All behavioral rules preserved — only verbosity removed.
 
 ## Type of Change
 
-- [x] Bug fix
-- [x] New feature
-- [ ] Refactor (no functional changes)
+- [ ] Bug fix
+- [ ] New feature
+- [x] Refactor (no functional changes)
 - [ ] Documentation
 - [ ] Tests
 - [ ] Security
 
 ## Changes Made
 
-### New: `app_register` tool
-- **`packages/tools/src/tools/app-register.ts`** — New tool that directly manipulates `appRegistry` + `AppManager`, bypassing HTTP auth
-- **Managed mode** (preferred): Provide `name`, `port`, `cwd`, `command`, `args` → AppManager spawns process with auto-restart + health checks
-- **Unmanaged mode**: Provide `name`, `port` → registers for proxy routing only
-- Validates app name, port range, reserved ports (18800/3306)
-- Persists registry to vault
-- Returns the public URL for the app
-
-### Wiring & Integration
-- **`packages/tools/src/index.ts`** — Exported and registered `AppRegisterTool` (21 tools total)
-- **`packages/core/src/gateway/chat-routes.ts`** — `setAppRegisterRefs()` wired with appRegistry, appManager, vault, publicUrl, getSiteUrl
-- **`packages/agent/src/runtime.ts`** — System prompt updated to instruct agent to use `app_register` tool instead of curl; added APP LIFECYCLE section
-
-### Test Update
-- **`tests/api.test.ts`** — Expected tool count updated from 20 → 21
+- **System prompt condensed** (`packages/agent/src/runtime.ts`): ~280 lines → ~70 lines.
+  - Tool descriptions compressed to one-liners (full params already in tool definitions sent to LLM).
+  - Removed redundant examples (forge_team example, plan violation examples, dual-env examples).
+  - Merged SERVING CONTENT + SERVER NETWORKING + PROXY AWARENESS into single section.
+  - Merged SELF-MANAGEMENT + TROUBLESHOOTING + PROCESS PERSISTENCE into CRITICAL RULES.
+  - Merged VERIFICATION + LINK DELIVERY into single section.
+  - Condensed PLANNING section (removed step-by-step flow, kept core rules).
+  - All behavioral rules, restrictions, and critical warnings preserved.
 
 ## How to Test
 
 1. `pnpm -r build`
-2. `pnpm forge start --migrate`
-3. `pnpm test` — expect 21 tools registered
-4. Ask the agent to create a web app (e.g. "create a portfolio site with Express") → verify it uses `app_register` instead of `curl`
-5. Verify the app URL works and the app appears in `/api/apps/managed`
+2. `pnpm test` — all tests passing
+3. Deploy and test same prompts as before — agent behavior should be identical but faster.
+4. Compare token usage: expect ~40-50% reduction in total tokens per task.
 
 ## Related Issue
 
-Fixes: Agent fails to register apps because `curl POST /api/apps/register` is blocked by gateway authentication middleware.
+High latency (~350s) and token usage (~164k) observed on simple tasks due to oversized system prompt re-sent every tool-loop iteration.
 
 ## Screenshots
 
@@ -52,3 +44,17 @@ N/A
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
 - [x] Documentation updated (if needed)
+
+---
+
+### Impact Analysis
+
+| Metric | Before | After (estimated) |
+|--------|--------|-------------------|
+| System prompt lines | ~280 | ~70 |
+| System prompt tokens | ~5,000 | ~2,000 |
+| Tokens saved per iteration | — | ~3,000 |
+| 10-iteration task savings | — | ~30,000 tokens |
+| Latency reduction | — | ~30-40% |
+
+No rules removed — only verbosity. The PromptOptimizer continues to work complementarily.
