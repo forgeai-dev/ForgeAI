@@ -1,11 +1,11 @@
 ## Description
 
-Add backend & fullstack architecture patterns to the agent system prompt. Addresses agent struggling with API+frontend integration (wrong URLs, missing CORS, untested APIs, mixed files).
+Update DeepSeek provider to V3.2 pricing and models. Remove deprecated `deepseek-coder` (merged into `deepseek-chat` since V2.5). Update pricing from old rates to V3.2 unified pricing ($0.28/$0.42 per 1M tokens for both chat and reasoner).
 
 ## Type of Change
 
-- [ ] Bug fix
-- [x] New feature
+- [x] Bug fix
+- [ ] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
 - [ ] Tests
@@ -13,31 +13,17 @@ Add backend & fullstack architecture patterns to the agent system prompt. Addres
 
 ## Changes Made
 
-- **Backend playbook added** (`packages/agent/src/runtime.ts`): 10 concise lines (~200 tokens) covering:
-  - Architecture order: backend first → test → then frontend
-  - File separation: server.js + public/index.html (never mixed)
-  - URL patterns: relative paths (/api/...) for proxy compatibility
-  - CORS middleware guidance
-  - Static + API serving pattern via ForgeAI proxy
-  - Database recommendations (SQLite for simple, MySQL for production)
-  - Error handling patterns (try/catch, HTTP status codes)
-  - API testing before frontend integration
-  - Full integration verification flow
+- **Pricing updated** (`packages/agent/src/usage-tracker.ts`): DeepSeek V3.2 unified pricing — $0.28/1M input, $0.42/1M output for both `deepseek-chat` and `deepseek-reasoner`. Removed `deepseek-coder`.
+- **Provider models** (`packages/agent/src/providers/deepseek.ts`): Removed deprecated `deepseek-coder` model.
+- **Provider meta** (`packages/core/src/gateway/chat-routes.ts`): Removed `deepseek-coder` from ALL_PROVIDERS_META.
+- **Dashboard** (`packages/dashboard/src/pages/Settings.tsx`): Updated display text to "DeepSeek Chat (V3.2), Reasoner (V3.2)".
+- **Balance API**: Already implemented — `getBalance()` calls `https://api.deepseek.com/user/balance` and converts CNY to USD.
 
 ## How to Test
 
-1. `pnpm -r build`
-2. `pnpm test` — all tests passing
-3. Deploy and ask agent: "Crie uma API Express com CRUD de produtos e um frontend que liste os produtos"
-4. Agent should: create API first → test routes → then create frontend with relative URLs
-
-## Related Issue
-
-Agent frequently fails at backend+frontend integration: hardcoded localhost URLs, missing CORS, untested APIs, mixed server+HTML files.
-
-## Screenshots
-
-N/A
+1. `pnpm -r build` + `pnpm test`
+2. In Dashboard → Settings, DeepSeek should show "Chat (V3.2), Reasoner (V3.2)"
+3. Select deepseek-chat or deepseek-reasoner as active model, send a message, verify cost tracking shows correct pricing
 
 ## Checklist
 
@@ -45,4 +31,3 @@ N/A
 - [x] Tests pass (`pnpm test`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Documentation updated (if needed)
