@@ -1,51 +1,33 @@
-## Description
+## Problem
 
-Major agent intelligence upgrade: connects the AutoPlanner to the runtime for structured task execution, enables parallel tool execution for speed, and adds automatic reflection/verification for quality assurance.
+When the agent creates dynamic apps, it starts them with a fragile background process that dies easily. When the app crashes, the proxy returns raw JSON exposing internal tool names, which then triggers Prompt Guard false positives when users paste the error back.
 
-## Type of Change
+## Solution
 
-- [ ] Bug fix
-- [x] New feature
-- [ ] Refactor (no functional changes)
-- [ ] Documentation
-- [ ] Tests
-- [ ] Security
+### AppManager (app-manager.ts)
+- Full process lifecycle: spawn, monitor, auto-restart with exponential backoff (up to 5 restarts)
+- Health checks every 30s (HTTP HEAD probe on app port)
+- Graceful shutdown: SIGTERM then SIGKILL after 5s
+- Per-app status tracking: running/stopped/crashed/starting
 
-## Changes Made
+### Beautiful Offline Page
+- Dark-themed HTML error page replaces raw JSON when app is down
+- Auto-refreshes every 15s, no internal details exposed
 
-### 1. AutoPlanner Integration (`plan_create` / `plan_update` tools)
-- New `packages/tools/src/tools/plan-tools.ts`: `plan_create` and `plan_update` tools with per-session plan store
-- Agent creates structured plans before complex tasks (3+ steps)
-- Plan context injected into every LLM iteration via `planContextProvider`
-- Real-time plan progress tracking (step status: pending/in_progress/completed/failed/skipped)
-- Auto-advances to next step on completion; max 15 steps per plan
-- System prompt updated with EXECUTION PLANNING instructions
+### Managed App Registration
+- POST /api/apps/register now accepts cwd, command, args to start as managed process
+- New endpoints: restart, stop, list managed apps
+- Registry now includes status, PID, restart count, last health check
 
-### 2. Parallel Tool Execution
-- When LLM returns 2+ tool calls in one response, they execute concurrently via `Promise.allSettled`
-- Single tool calls remain sequential (no overhead)
-- Graceful error handling: rejected promises produce error results without crashing
-- Progress shows "N tools in parallel" during concurrent execution
-- Results processed in order for correct LLM message sequencing
-
-### 3. Reflection/Verification Step
-- After complex tasks (3+ iterations, 3+ tool calls), triggers one reflection pass
-- LLM verifies: all steps completed? errors? files exist?
-- If issues found, LLM can make corrective tool calls automatically
-- `reflectionDone` flag prevents infinite reflection loops
-- Emits "Verifying work quality..." step for real-time UI feedback
-
-## Checklist
-
-- [x] Commit messages follow Conventional Commits
-- [x] No secrets or API keys committed
-- [x] Full build passes (`pnpm -r build`)
+### System Prompt Updates
+- Agent instructed to use managed registration over background processes
+- Must verify app URL works before presenting to user
 
 ### Files Changed
 
 | File | Changes |
 |------|---------|
-| `packages/tools/src/tools/plan-tools.ts` | NEW: plan_create, plan_update tools + session plan store + buildPlanContext |
-| `packages/tools/src/index.ts` | Export plan tools + register in createDefaultToolRegistry |
-| `packages/agent/src/runtime.ts` | planContextProvider, _sessionId injection, parallel execution, reflection step, system prompt update |
-| `packages/core/src/gateway/chat-routes.ts` | Import buildPlanContext, wire as planContextProvider on default agent |
+| `packages/core/src/gateway/app-manager.ts` | NEW: AppManager class + generateAppDownPage |
+| `packages/core/src/gateway/chat-routes.ts` | Managed registration, control endpoints, HTML error page |
+| `packages/core/src/gateway/server.ts` | Subdomain proxy uses HTML error page |
+| `packages/agent/src/runtime.ts` | System prompt with managed app instructions |
