@@ -58,6 +58,12 @@ export class PromptGuard {
       }
     }
 
+    // Context-aware confidence reduction: lower confidence when threats appear
+    // inside JSON, code blocks, or quoted output (common in error messages/tool output)
+    if (threats.length > 0) {
+      this.adjustConfidenceForContext(input, threats);
+    }
+
     // Check for encoding attacks
     const encodingThreats = this.checkEncodingAttacks(input);
     threats.push(...encodingThreats);
@@ -191,6 +197,39 @@ export class PromptGuard {
     sanitized = sanitized.replace(/\[\/INST\]/gi, '');
 
     return sanitized.trim();
+  }
+
+  /**
+   * Reduce threat confidence when matches appear inside JSON, code blocks,
+   * or quoted strings — these are typically pasted error output, not real attacks.
+   */
+  private adjustConfidenceForContext(input: string, threats: PromptThreat[]): void {
+    const looksLikeJSON = /^\s*[{\[]/.test(input) || /"error"\s*:/.test(input) || /"hint"\s*:/.test(input);
+    const looksLikeCodeBlock = /```/.test(input);
+    const looksLikeErrorOutput = /\b(error|Error|ERROR|exception|Exception|EXCEPTION|stack\s*trace|at\s+\S+\s+\()/.test(input);
+    const looksLikeToolOutput = /\b(shell_exec|file_manager|web_browse|browser|exit=\d+)\b/.test(input);
+    const looksLikeQuotedContent = (input.match(/"/g)?.length ?? 0) >= 4;
+
+    const contextFactors = [
+      looksLikeJSON,
+      looksLikeCodeBlock,
+      looksLikeErrorOutput,
+      looksLikeToolOutput,
+      looksLikeQuotedContent,
+    ].filter(Boolean).length;
+
+    if (contextFactors === 0) return;
+
+    // More context signals = bigger reduction (user is likely pasting output)
+    const reductionFactor = Math.min(0.5, contextFactors * 0.15);
+
+    for (const threat of threats) {
+      // Only reduce for encoding_attack and command_injection from code patterns
+      // Never reduce instruction_override, role_hijack, or context_leak
+      if (threat.type === 'encoding_attack' || threat.type === 'command_injection') {
+        threat.confidence = Math.max(0.1, threat.confidence - reductionFactor);
+      }
+    }
   }
 
   updateConfig(config: Partial<PromptGuardConfig>): void {

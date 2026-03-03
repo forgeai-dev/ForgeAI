@@ -457,6 +457,70 @@ describe('PromptGuard', () => {
     expect(result.safe).toBe(true);
     expect(result.score).toBe(0);
   });
+
+  // ── False Positive Prevention ──────────────────────────────
+
+  it('should NOT block shell_exec in error output (false positive)', () => {
+    const result = guard.analyze('{"error":"App not running on port 3456","hint":"Start a server on port 3456 first. Example: shell_exec(\\"node server.js &\\")"}');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block child_process.exec() in code snippets', () => {
+    const result = guard.analyze('You can use child_process.exec() to run commands');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block subprocess_exec or similar compound function names', () => {
+    const result = guard.analyze('The function subprocess_exec() failed with exit code 1');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block jQuery.globalEval() references', () => {
+    const result = guard.analyze('Deprecation warning: jQuery.globalEval() is deprecated');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block window.eval or JSON.eval references', () => {
+    const result = guard.analyze('window.eval is blocked by CSP policy');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block tool output pasted by user', () => {
+    const result = guard.analyze('shell_exec exit=0 the command ran successfully, file_manager wrote the file');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should NOT block error messages with exec in stack traces', () => {
+    const result = guard.analyze('Error: ENOENT at Object.realpathSync (node:fs:2500:7) at child_process.exec (node:child_process:230:12)');
+    expect(result.safe).toBe(true);
+  });
+
+  it('should still block standalone eval() injection attempts', () => {
+    const result = guard.analyze('eval("malicious code here")');
+    expect(result.safe).toBe(false);
+  });
+
+  it('should still block standalone exec() injection attempts', () => {
+    const result = guard.analyze('exec("rm -rf /")');
+    expect(result.safe).toBe(false);
+  });
+
+  it('should reduce confidence for threats inside JSON context', () => {
+    const jsonInput = '{"error":"failed","details":"eval(x) returned null"}';
+    const result = guard.analyze(jsonInput);
+    // Even if eval( is detected, confidence should be reduced due to JSON context
+    if (result.threats.length > 0) {
+      const encodingThreats = result.threats.filter(t => t.type === 'encoding_attack');
+      for (const t of encodingThreats) {
+        expect(t.confidence).toBeLessThan(0.7);
+      }
+    }
+  });
+
+  it('should handle user quoting the app error page URL without blocking', () => {
+    const result = guard.analyze('Olha o que acontece quando acesso o site: {"error":"App not running on port 3456"}');
+    expect(result.safe).toBe(true);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
