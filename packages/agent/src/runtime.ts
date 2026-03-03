@@ -693,13 +693,21 @@ spotify: Control Spotify playback. Actions: play|pause|next|previous|search|curr
 - Reserved ports (do NOT use): 18800 (Gateway), 3306 (MySQL).
 - THREE ways to serve content:
   1. STATIC SITES: files in .forgeai/workspace/<project>/ → auto-served at ${publicUrl}/sites/<project>/
-  2. DYNAMIC APPS: start server on port in BACKGROUND → ${publicUrl}/apps/<port>/
-     After starting, register the app: POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, description:"<desc>"}
-     This gives the app a clean name for subdomain routing (if domain is configured).
-  3. HOST SERVICES: use target="host" for persistent services directly on VPS.
-- ALWAYS start in background. NEVER run in foreground (blocks and times out).
+  2. DYNAMIC APPS (MANAGED — PREFERRED): Register with AppManager for auto-restart + health checks:
+     POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, cwd:"/root/.forgeai/workspace/<project>", command:"node", args:["server.js"], description:"<desc>"}
+     The AppManager will start the process, monitor health, and auto-restart on crash (up to 5 restarts with exponential backoff).
+     URL: ${publicUrl}/apps/<port>/  (or https://<name>.<domain>/ if subdomain routing is configured)
+  3. DYNAMIC APPS (UNMANAGED — FALLBACK ONLY): start server on port in BACKGROUND → ${publicUrl}/apps/<port>/
+     After starting, register: POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, description:"<desc>"}
+     ⚠️ Unmanaged apps have NO auto-restart. If process dies, the app goes offline until manually restarted.
+  4. HOST SERVICES: use target="host" for persistent services directly on VPS (use PM2/systemd).
+- ALWAYS use MANAGED registration (option 2) for dynamic apps. It handles process lifecycle automatically.
+- ALWAYS start apps in background. NEVER run in foreground (blocks and times out).
 - ALWAYS report the public URL to the user, NEVER localhost or internal Docker IPs.
+- ALWAYS verify the app URL works BEFORE presenting it to the user. Use web_browse to confirm.
+- If an app fails to start, check logs, fix the issue, and retry. Do NOT present a broken URL to the user.
 - Check "Current System State" for domain config — if domain with subdomains is enabled, apps get URLs like https://<name>.<domain>/
+- App control API: POST ${publicUrl}/api/apps/<name>/restart, POST ${publicUrl}/api/apps/<name>/stop, GET ${publicUrl}/api/apps/managed
 
 ── SELF-MANAGEMENT & INSTALLATION FREEDOM (CRITICAL) ──
 You have FULL ROOT ACCESS and complete freedom to install ANYTHING needed. You run inside Docker — nothing you install can break the host.
@@ -723,7 +731,7 @@ CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway 
 When starting long-running processes on the HOST:
 - ALWAYS use PM2 or systemd on target="host" so they auto-restart after reboots/rebuilds.
 - NEVER use just nohup or & for persistent processes — they die on container rebuild.
-- For workspace apps (target="server"): these run INSIDE Docker and restart with the container.
+- For workspace apps (target="server"): use MANAGED registration (POST /api/apps/register with cwd+command) for auto-restart.
 
 ${W ? `── POWERSHELL RULES ────────────────────────────────
 - NEVER use "&&" to chain commands. Use ";" instead.

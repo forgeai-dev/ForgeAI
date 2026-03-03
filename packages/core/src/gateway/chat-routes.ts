@@ -13,6 +13,7 @@ import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, c
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
+import { createAppManager, type AppManager, generateAppDownPage } from './app-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
 import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef } from './chat-commands.js';
 import { createAutopilotEngine, type AutopilotEngine } from '../autopilot/autopilot-engine.js';
@@ -66,6 +67,7 @@ let sessionRecorder: SessionRecorder | null = null;
 let homeAssistantIntegration: HomeAssistantIntegration | null = null;
 let spotifyIntegration: SpotifyIntegration | null = null;
 let activityStore: ActivityStore | null = null;
+let appManager: AppManager | null = null;
 
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
@@ -2750,10 +2752,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       const body = await proxyRes.text();
       return reply.send(body);
     } catch (err) {
-      reply.status(502).send({
-        error: `App not running on port ${portNum}`,
-        hint: `Start a server on port ${portNum} first. Example: shell_exec("node server.js &")`,
-      });
+      // Find app name from registry for better error page
+      let appName: string | undefined;
+      for (const [name, info] of appRegistry) {
+        if (info.port === portNum) { appName = name; break; }
+      }
+      reply.status(502).header('Content-Type', 'text/html; charset=utf-8').send(generateAppDownPage(portNum, appName));
     }
   });
 
@@ -3499,21 +3503,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
   });
 
+  // ─── App Manager ─────────────────────────────────
+
+  appManager = createAppManager({ maxRestarts: 5, healthCheckIntervalMs: 30_000 });
+
   // ─── App Registry ─────────────────────────────────
 
   app.get('/api/apps/registry', async () => {
-    const apps = Array.from(appRegistry.entries()).map(([name, info]) => ({
-      name,
-      port: info.port,
-      url: getSiteUrl(name, 'app', vault),
-      createdAt: info.createdAt,
-      description: info.description,
-    }));
+    const apps = Array.from(appRegistry.entries()).map(([name, info]) => {
+      const managed = appManager?.getApp(name);
+      return {
+        name,
+        port: info.port,
+        url: getSiteUrl(name, 'app', vault),
+        createdAt: info.createdAt,
+        description: info.description,
+        status: managed?.status ?? 'unknown',
+        pid: managed?.pid,
+        restarts: managed?.restarts ?? 0,
+        lastHealthCheck: managed?.lastHealthCheck,
+      };
+    });
     return { apps };
   });
 
   app.post('/api/apps/register', async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = request.body as { name?: string; port?: number; description?: string };
+    const body = request.body as { name?: string; port?: number; description?: string; cwd?: string; command?: string; args?: string[] };
     if (!body.name || !body.port) {
       reply.status(400).send({ error: 'name and port are required' }); return;
     }
@@ -3535,6 +3550,23 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       description: body.description,
     });
 
+    // If cwd and command provided, start as managed app with auto-restart
+    let managed = false;
+    if (body.cwd && body.command && appManager) {
+      const result = await appManager.startApp({
+        name,
+        port: portNum,
+        cwd: body.cwd,
+        command: body.command,
+        args: body.args,
+        description: body.description,
+      });
+      managed = result.success;
+      if (!result.success) {
+        logger.warn('App registered but managed start failed', { name, error: result.error });
+      }
+    }
+
     // Persist to vault
     if (vault?.isInitialized()) {
       const registryData = JSON.stringify(Array.from(appRegistry.entries()));
@@ -3542,8 +3574,29 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     }
 
     const url = getSiteUrl(name, 'app', vault);
-    logger.info('App registered', { name, port: portNum, url });
-    return { name, port: portNum, url, registered: true };
+    logger.info('App registered', { name, port: portNum, url, managed });
+    return { name, port: portNum, url, registered: true, managed };
+  });
+
+  // Managed app control endpoints
+  app.post('/api/apps/:name/restart', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { name } = request.params as { name: string };
+    if (!appManager) { reply.status(503).send({ error: 'App manager not ready' }); return; }
+    const result = await appManager.restartApp(name);
+    if (!result.success) { reply.status(400).send({ error: result.error }); return; }
+    return { restarted: true, name };
+  });
+
+  app.post('/api/apps/:name/stop', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { name } = request.params as { name: string };
+    if (!appManager) { reply.status(503).send({ error: 'App manager not ready' }); return; }
+    const result = appManager.stopApp(name);
+    if (!result.success) { reply.status(400).send({ error: result.error }); return; }
+    return { stopped: true, name };
+  });
+
+  app.get('/api/apps/managed', async () => {
+    return { apps: appManager?.listApps() ?? [] };
   });
 
   app.delete('/api/apps/registry/:name', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -3552,6 +3605,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       reply.status(404).send({ error: 'App not found' }); return;
     }
     appRegistry.delete(name);
+    appManager?.removeApp(name);
 
     // Persist to vault
     if (vault?.isInitialized()) {
