@@ -1,10 +1,12 @@
 ## Description
 
-Sub-Agent Visibility & Persistence (Phase 1 + 2): Delegation history store persists sub-agent results instead of deleting them, new API endpoints expose delegation history, and the Agents dashboard now renders Forge Teams and delegation history with full CRUD.
+Phase 3: Real-time WebSocket streaming of sub-agent progress + App deletion bug fix + ProjectDelete tool.
+
+Sub-agents now stream their progress (tool calls, thinking, steps) in real-time to the parent session's dashboard via WebSocket. Also fixes the bug where deleted apps remained accessible via their port URL, and adds a comprehensive `project_delete` tool.
 
 ## Type of Change
 
-- [ ] Bug fix
+- [x] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
@@ -13,24 +15,27 @@ Sub-Agent Visibility & Persistence (Phase 1 + 2): Delegation history store persi
 
 ## Changes Made
 
-- **DelegationRecord interface** added to `agent-manager.ts`: id, role, task, result, model, provider, status, duration, steps, tokens, timestamps, source
-- **delegateTask() now persists results** before cleanup — captures content, steps, tokens, error status into in-memory history (capped at 100 FIFO)
-- **History management methods**: `addDelegationRecord()`, `getDelegationHistory()`, `removeDelegation()`, `clearDelegationHistory()`
-- **API endpoints** in `chat-routes.ts`: `GET /api/delegations`, `DELETE /api/delegations/:id`, `DELETE /api/delegations`
-- **Forge Teams section** in Agents dashboard: active teams with worker status badges (running/completed/failed/pending)
-- **Sub-Agentes & Delegações section** in Agents dashboard: delegation history cards with role, task, result preview, model, duration, tokens, timestamps
-- Individual delete + bulk clear for delegations
-- Auto-refresh every 10s for live team status
-- Dashboard API types: `DelegationRecord`, `TeamInfo` interfaces + `getDelegations()`, `deleteDelegation()`, `clearDelegations()` methods
+### Phase 3: Real-time Sub-Agent Streaming
+- **`AgentManager.setProgressBroadcaster()`** — new method to register a callback that forwards sub-agent progress events to the parent session
+- **`delegateTask()` registers `onProgress` listener** on delegate runtimes — events prefixed with `delegate.` (progress/step/done) are broadcast to the parent session via WebSocket
+- **Gateway wiring** in `chat-routes.ts` — connects the broadcaster to `wsBroadcaster.broadcastToSession()`
+- **Chat.tsx delegate progress UI** — new `delegateProgress` state tracks active sub-agents, renders purple-themed cards with role, iteration, tool calls, and step history in real-time
+
+### Bug Fix: App Deletion
+- **Proxy 404 for unregistered ports** — `/apps/:portOrName/*` now returns 404 if port-based lookup finds no registered app, instead of proxying and showing "Application Offline"
+- **`project_delete` tool** — comprehensive cleanup: stops process, kills port, removes from `appRegistry`, persists to vault, deletes project files
+
+### Phase 1+2 (from previous session)
+- DelegationRecord persistence, delegation history API, Forge Teams + delegations in Agents dashboard
 
 ## How to Test
 
 1. `pnpm -r build`
 2. `pnpm forge start --migrate`
 3. `pnpm test` — expect all tests passing (131 pass)
-4. Open dashboard → Agents page → verify Forge Teams and Delegations sections appear after sub-agent activity
-5. Use `agent_delegate` or `forge_team` tools → verify delegation records appear in dashboard
-6. Delete individual records and clear all → verify cleanup works
+4. Open dashboard → Chat → trigger `agent_delegate` → verify sub-agent progress appears in purple cards with live tool calls
+5. Delete an app → verify its port URL returns 404
+6. Ask agent to use `project_delete` → verify full cleanup (process, registry, files)
 
 ## Related Issue
 

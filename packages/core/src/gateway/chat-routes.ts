@@ -4,7 +4,7 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef, setProjectDeleteRefs } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
@@ -12,6 +12,7 @@ import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatComm
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
+import { resolve as pathResolveSync } from 'node:path';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
 import { createAppManager, type AppManager, generateAppDownPage } from './app-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
@@ -451,6 +452,23 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // Wire Forge Teams engine with AgentManager for coordinated team execution
   const forgeTeamEngine = createForgeTeamEngine(agentManager);
   setForgeTeamRef(forgeTeamEngine, { getActiveTeams });
+
+  // Phase 3: Wire sub-agent progress broadcaster → forward delegate events to parent session via WS
+  agentManager.setProgressBroadcaster((parentSessionId, event) => {
+    const wsBroadcaster = getWSBroadcaster();
+    if (wsBroadcaster) {
+      wsBroadcaster.broadcastToSession(parentSessionId, { ...event } as unknown as Record<string, unknown>);
+    }
+  });
+
+  // Wire ProjectDelete tool with app registry, app manager, and vault
+  const workspaceRoot = pathResolveSync(process.cwd(), '.forgeai', 'workspace');
+  setProjectDeleteRefs({
+    appRegistry: appRegistry as any,
+    appManager: appManager ?? null,
+    vault: vault ?? null,
+    workspaceRoot,
+  });
 
   // Wire CronSchedulerTool callback for proactive message delivery
   const cronTool = toolRegistry.get('cron_scheduler') as CronSchedulerTool | undefined;
@@ -2719,9 +2737,13 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     if (!isNaN(parsed) && String(parsed) === portOrName) {
       // Port-based routing: /apps/3001/
       portNum = parsed;
-      // Find app name for error pages
+      // Find app name in registry — if not found, return 404
       for (const [name, info] of appRegistry) {
         if (info.port === portNum) { appName = name; break; }
+      }
+      if (!appName) {
+        reply.status(404).send({ error: `No app registered on port ${portNum}. It may have been deleted.` });
+        return;
       }
     } else {
       // Name-based routing: /apps/war-monitor/

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2, Flame, StopCircle } from 'lucide-react';
+import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2, Flame, StopCircle, GitBranch } from 'lucide-react';
 import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -387,6 +387,7 @@ export function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [executionStatus, setExecutionStatus] = useState<string | null>(null);
   const [liveProgress, setLiveProgress] = useState<LiveProgress | null>(null);
+  const [delegateProgress, setDelegateProgress] = useState<Map<string, { role: string; status: string; currentTool?: string; iteration: number; maxIterations: number; steps: Array<{ type: string; tool?: string; message?: string; success?: boolean; duration?: number }> }>>(new Map());
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionChannelType, setSessionChannelType] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -596,6 +597,32 @@ export function ChatPage() {
         const eventSid = data.sessionId;
         if (eventSid && currentSid && eventSid !== currentSid) return;
         setLiveProgress(prev => prev ? { ...prev, steps: [...prev.steps, data.step] } : prev);
+
+      // ─── Delegate (sub-agent) streaming events (Phase 3) ───
+      } else if (data.type === 'delegate.progress' && data.delegateId) {
+        setDelegateProgress(prev => {
+          const next = new Map(prev);
+          const existing = next.get(data.delegateId) || { role: data.delegateRole || 'sub-agent', status: 'thinking', iteration: 0, maxIterations: 20, steps: [] };
+          const p = data.progress || {};
+          next.set(data.delegateId, { ...existing, status: p.status || existing.status, currentTool: p.currentTool, iteration: p.iteration ?? existing.iteration, maxIterations: p.maxIterations ?? existing.maxIterations });
+          return next;
+        });
+      } else if (data.type === 'delegate.step' && data.delegateId && data.step) {
+        setDelegateProgress(prev => {
+          const next = new Map(prev);
+          const existing = next.get(data.delegateId);
+          if (existing) {
+            next.set(data.delegateId, { ...existing, steps: [...existing.steps, data.step] });
+          }
+          return next;
+        });
+      } else if (data.type === 'delegate.done' && data.delegateId) {
+        setDelegateProgress(prev => {
+          const next = new Map(prev);
+          next.delete(data.delegateId);
+          return next;
+        });
+
       } else if (data.type === 'agent.done') {
         // Always refresh sessions list (new channel messages appear in sidebar)
         api.getSessions().then(d => setSessions(d.sessions ?? [])).catch(() => {});
@@ -657,6 +684,7 @@ export function ChatPage() {
                 setLoading(false);
                 setExecutionStatus(null);
                 setLiveProgress(null);
+                setDelegateProgress(new Map());
               }).catch(() => {});
             }, 500);
           }
@@ -739,6 +767,7 @@ export function ChatPage() {
       progressIntervalRef.current = null;
     }
     setLiveProgress(null);
+    setDelegateProgress(new Map());
   }, []);
 
   // Cleanup on unmount
@@ -847,6 +876,7 @@ export function ChatPage() {
               setLoading(false);
               setExecutionStatus(null);
               setLiveProgress(null);
+              setDelegateProgress(new Map());
             }).catch(() => {});
           }
         } catch {
@@ -1025,6 +1055,7 @@ export function ChatPage() {
       setLoading(false);
       setExecutionStatus(null);
       setLiveProgress(null);
+      setDelegateProgress(new Map());
       inputRef.current?.focus();
     }
   };
@@ -1036,6 +1067,7 @@ export function ChatPage() {
       setLoading(false);
       setExecutionStatus(null);
       setLiveProgress(null);
+      setDelegateProgress(new Map());
       stopProgressPolling();
       setMessages((prev) => [
         ...prev,
@@ -1050,6 +1082,7 @@ export function ChatPage() {
       setLoading(false);
       setExecutionStatus(null);
       setLiveProgress(null);
+      setDelegateProgress(new Map());
     }
   }, [sessionId]);
 
@@ -1345,6 +1378,43 @@ export function ChatPage() {
                         </div>
                       ));
                     })()}
+                  </div>
+                )}
+
+                {/* Phase 3: Sub-agent (delegate) live progress */}
+                {delegateProgress.size > 0 && (
+                  <div className="mt-3 pt-2 border-t border-zinc-700/30 space-y-2">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <GitBranch className="w-3 h-3 text-purple-400" />
+                      <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wide">Sub-Agentes</span>
+                    </div>
+                    {Array.from(delegateProgress.entries()).map(([dId, dp]) => (
+                      <div key={dId} className="rounded-lg border border-purple-500/20 bg-purple-500/[0.03] px-3 py-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Loader2 className="w-3 h-3 text-purple-400 animate-spin" />
+                          <span className="text-[11px] font-medium text-purple-300">{dp.role}</span>
+                          <span className="text-[10px] text-zinc-500 ml-auto">
+                            [{dp.iteration}/{dp.maxIterations}]
+                            {dp.currentTool && <span className="ml-1 text-purple-400">▶ {dp.currentTool}</span>}
+                          </span>
+                        </div>
+                        {dp.steps.length > 0 && (
+                          <div className="space-y-1 mt-1.5">
+                            {dp.steps.slice(-5).map((s, i) => (
+                              <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                {s.type === 'tool_call' && <Terminal className="w-2.5 h-2.5 text-blue-400" />}
+                                {s.type === 'tool_result' && (s.success ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <XCircle className="w-2.5 h-2.5 text-red-400" />)}
+                                {s.type === 'thinking' && <Brain className="w-2.5 h-2.5 text-amber-400" />}
+                                <span className="text-zinc-400 truncate">
+                                  {s.tool || s.message || s.type}
+                                </span>
+                                {s.duration !== undefined && <span className="text-zinc-600 ml-auto">{s.duration}ms</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

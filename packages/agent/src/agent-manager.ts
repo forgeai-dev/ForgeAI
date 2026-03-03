@@ -8,7 +8,7 @@ import type {
   AgentInfo,
   LLMProvider,
 } from '@forgeai/shared';
-import { AgentRuntime, type ToolExecutor, type AgentResult, type SessionInfo } from './runtime.js';
+import { AgentRuntime, type ToolExecutor, type AgentResult, type SessionInfo, type AgentProgressEvent } from './runtime.js';
 import { LLMRouter } from './router.js';
 import { UsageTracker, createUsageTracker } from './usage-tracker.js';
 import { MemoryManager } from './memory-manager.js';
@@ -56,11 +56,19 @@ export class AgentManager {
   private memoryManager: MemoryManager | null = null;
   private createdAt: Map<string, Date> = new Map();
   private delegationHistory: DelegationRecord[] = [];
+  private progressBroadcaster: ((parentSessionId: string, event: AgentProgressEvent & { delegateId: string; delegateRole: string }) => void) | null = null;
 
   constructor(router: LLMRouter, usageTracker?: UsageTracker) {
     this.router = router;
     this.usageTracker = usageTracker ?? createUsageTracker();
     logger.info('AgentManager initialized');
+  }
+
+  /**
+   * Set a callback to broadcast sub-agent progress events to the parent session (Phase 3).
+   */
+  setProgressBroadcaster(cb: (parentSessionId: string, event: AgentProgressEvent & { delegateId: string; delegateRole: string }) => void): void {
+    this.progressBroadcaster = cb;
   }
 
   /**
@@ -584,6 +592,19 @@ export class AgentManager {
     // Copy planContextProvider from parent if available
     if (defaultAgent && (defaultAgent as any).planContextProvider) {
       runtime.setPlanContextProvider((defaultAgent as any).planContextProvider);
+    }
+
+    // Phase 3: Register progress listener to stream sub-agent events to parent session
+    if (this.progressBroadcaster) {
+      const broadcaster = this.progressBroadcaster;
+      const parentSid = params.parentSessionId;
+      const role = params.role;
+      const dId = delegateId;
+      runtime.onProgress(sessionId, (event) => {
+        try {
+          broadcaster(parentSid, { ...event, type: `delegate.${event.type}` as any, delegateId: dId, delegateRole: role });
+        } catch { /* ignore broadcast errors */ }
+      });
     }
 
     // Track result for delegation history
