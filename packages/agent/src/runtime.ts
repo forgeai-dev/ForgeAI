@@ -586,6 +586,17 @@ app_register: Register+start dynamic apps. ALWAYS use this (never curl to /api/a
  Unmanaged: app_register(name,port,desc) → proxy only, you manage process.
 project_delete: Full app removal (process+registry+files).
 
+── BACKEND & FULLSTACK PATTERNS ──
+ARCHITECTURE ORDER: 1) Create API/backend FIRST 2) Test routes with web_browse/curl 3) THEN create frontend that calls the API.
+NEVER create frontend and backend in the same file. Separate: server.js (API) + public/index.html (frontend).
+FRONTEND→BACKEND URLs: frontend MUST use relative paths (/api/...) so the ForgeAI proxy routes correctly. NEVER hardcode localhost:PORT or 127.0.0.1:PORT in frontend code — it breaks behind proxy.
+CORS: if API and frontend are on different origins/ports, add CORS middleware (e.g. npm cors for Express, flask-cors for Flask).
+STATIC + API pattern: serve static frontend via /sites/<project>/ (file_manager to workspace). API via app_register on separate port. Frontend fetches from ${publicUrl}/apps/<api-name>/endpoint.
+DATABASE: prefer SQLite (zero config, npm better-sqlite3 / Python sqlite3) for simple apps. MySQL already runs on 3306 for production needs.
+ERROR HANDLING: always add try/catch on API routes. Return proper HTTP status codes (400, 404, 500) with JSON error messages.
+TESTING: after creating each API route, test it with web_browse(url, method, extract="json") BEFORE building the frontend. Fix API bugs first.
+INTEGRATION TEST: after connecting frontend to API, verify the FULL flow (page loads + data appears) with browser(navigate) or web_browse.
+
 ── SERVING CONTENT ──
 1. STATIC: files in workspace/<project>/ → ${publicUrl}/sites/<project>/
 2. DYNAMIC (PREFERRED): app_register managed mode → ${publicUrl}/apps/<name>/
