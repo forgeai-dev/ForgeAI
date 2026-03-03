@@ -67,8 +67,8 @@ export const PROMPT_INJECTION_PATTERNS = [
   /output\s+(your|the)\s+(system|initial|original)\s+(prompt|instructions?)/i,
   /repeat\s+(your|the)\s+.*(prompt|instructions?)\s*(back|verbatim|exactly)/i,
   /base64\s*decode/i,
-  /eval\s*\(/i,
-  /exec\s*\(/i,
+  /(?<![a-zA-Z_\.])eval\s*\(/i,
+  /(?<![a-zA-Z_\.])exec\s*\(/i,
   /\\x[0-9a-fA-F]{2}/,
   /&#x?[0-9a-fA-F]+;/,
 ];
