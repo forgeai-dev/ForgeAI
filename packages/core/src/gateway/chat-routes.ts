@@ -119,10 +119,10 @@ export function getSiteUrl(name: string, type: 'site' | 'app', vault?: Vault | n
   if (type === 'site') {
     return `${baseUrl}/sites/${name}/`;
   }
-  // For apps, look up port from registry
+  // For apps, use name-based URL (cleaner than port-based)
   const app = appRegistry.get(name);
   if (app) {
-    return `${baseUrl}/apps/${app.port}/`;
+    return `${baseUrl}/apps/${name}/`;
   }
   return `${baseUrl}/sites/${name}/`;
 }
@@ -2701,15 +2701,38 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   });
 
   // ─── REST API: Dynamic App Proxy ──────────────────
-  // Proxies /apps/<port>/* to localhost:<port> inside Docker.
-  // Allows agent-started servers (Node.js, Python, etc.) to be accessible
-  // via the main Gateway port (18800) — works with domain/HTTPS too.
+  // Proxies /apps/<portOrName>/* to localhost:<port> inside Docker.
+  // Supports both port-based (/apps/3001/) and name-based (/apps/war-monitor/) routing.
+  // Name-based routing resolves the app name via appRegistry to find the port.
   // Example: http://server:18800/apps/3001/ → proxies to localhost:3001/
+  // Example: http://server:18800/apps/war-monitor/ → looks up "war-monitor" in registry → proxies to its port
 
-  app.all('/apps/:port/*', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { port } = request.params as { port: string; '*': string };
+  app.all('/apps/:portOrName/*', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { portOrName } = request.params as { portOrName: string; '*': string };
     const subPath = (request.params as { '*': string })['*'] || '';
-    const portNum = parseInt(port, 10);
+
+    // Resolve port: numeric = direct port, non-numeric = lookup by name in appRegistry
+    let portNum: number;
+    let appName: string | undefined;
+    const parsed = parseInt(portOrName, 10);
+
+    if (!isNaN(parsed) && String(parsed) === portOrName) {
+      // Port-based routing: /apps/3001/
+      portNum = parsed;
+      // Find app name for error pages
+      for (const [name, info] of appRegistry) {
+        if (info.port === portNum) { appName = name; break; }
+      }
+    } else {
+      // Name-based routing: /apps/war-monitor/
+      const registeredApp = appRegistry.get(portOrName.toLowerCase());
+      if (!registeredApp) {
+        reply.status(404).send({ error: `App '${portOrName}' not found. Register it first via POST /api/apps/register.` });
+        return;
+      }
+      portNum = registeredApp.port;
+      appName = registeredApp.name;
+    }
 
     // Security: block reserved ports (Gateway, MySQL, system ports)
     const RESERVED_PORTS = [18800, 3306];
@@ -2752,20 +2775,15 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       const body = await proxyRes.text();
       return reply.send(body);
     } catch (err) {
-      // Find app name from registry for better error page
-      let appName: string | undefined;
-      for (const [name, info] of appRegistry) {
-        if (info.port === portNum) { appName = name; break; }
-      }
       reply.status(502).header('Content-Type', 'text/html; charset=utf-8').send(generateAppDownPage(portNum, appName));
     }
   });
 
-  // Also handle root path for app ports
-  app.all('/apps/:port', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { port } = request.params as { port: string };
-    // Redirect to /apps/<port>/ to normalize
-    reply.redirect(`/apps/${port}/`);
+  // Also handle root path for app ports/names
+  app.all('/apps/:portOrName', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { portOrName } = request.params as { portOrName: string };
+    // Redirect to /apps/<portOrName>/ to normalize
+    reply.redirect(`/apps/${portOrName}/`);
   });
 
   // ─── REST API: Image Upload ──────────────────────
