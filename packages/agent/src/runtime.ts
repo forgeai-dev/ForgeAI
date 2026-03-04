@@ -881,6 +881,7 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
             temperature: this.config.temperature,
             maxTokens: this.config.maxTokens,
             signal,
+            noFallback: true,
           });
           totalUsage.promptTokens += finalResponse.usage.promptTokens;
           totalUsage.completionTokens += finalResponse.usage.completionTokens;
@@ -909,6 +910,7 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
           temperature: this.config.temperature,
           maxTokens: this.config.maxTokens,
           signal,
+          noFallback: true,
         });
 
         // Check abort right after LLM call returns
