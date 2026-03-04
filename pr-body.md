@@ -1,11 +1,11 @@
 ## Description
 
-Delete sites/apps from Dashboard Settings. Each site/app row now has a trash icon button with confirmation dialog. Static sites are deleted via new `DELETE /api/sites/:name` endpoint (removes workspace directory). Apps use existing `DELETE /api/apps/registry/:name`.
+Fix 429 Too Many Requests cascade on VPS + DeepSeek Reasoner compatibility.
 
 ## Type of Change
 
-- [ ] Bug fix
-- [x] New feature
+- [x] Bug fix
+- [ ] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
 - [ ] Tests
@@ -13,28 +13,23 @@ Delete sites/apps from Dashboard Settings. Each site/app row now has a trash ico
 
 ## Changes Made
 
-- **Backend: `DELETE /api/sites/:name`** (`packages/core/src/gateway/chat-routes.ts`):
-  - New endpoint to delete static sites from workspace
-  - Security: validates name, prevents directory traversal
-  - Removes the entire site directory recursively
+- **Rate limiter exempt list** (`packages/core/src/gateway/server.ts`):
+  - Added `/api/agents`, `/api/delegations`, `/api/chat/active`, `/api/settings/language`, `/api/providers/balances` to exact exempt set
+  - Added `/api/chat/sessions/`, `/api/settings/` to prefix exempt list
+  - Prevents 429 cascade when WebSocket disconnects and dashboard polls aggressively
 
-- **Dashboard API** (`packages/dashboard/src/lib/api.ts`):
-  - Added `deleteSite(name)` method
-
-- **Dashboard UI** (`packages/dashboard/src/pages/Settings.tsx`):
-  - Added trash icon (Trash2) button to each site/app row
-  - Confirmation dialog before deletion
-  - Calls `api.unregisterApp()` for apps, `api.deleteSite()` for sites
-  - Auto-refreshes the list after deletion
+- **DeepSeek Reasoner compatibility** (`packages/agent/src/providers/openai-compatible.ts`):
+  - Detect `reasoner` models (e.g. `deepseek-reasoner`)
+  - Skip `temperature` param (API rejects it for reasoner models)
+  - Skip `tools` param (reasoner models don't support function calling)
+  - Applied to both `chat()` and `chatStream()` methods
 
 ## How to Test
 
 1. `pnpm -r build`
-2. Go to Settings → Domain & Sites section
-3. Click the trash icon next to any site/app
-4. Confirm the deletion dialog
-5. Verify the site/app is removed from the list
-6. Verify the URL no longer serves content
+2. Set `deepseek-reasoner` as main model → send message via Telegram → should get a response (no API error)
+3. Open dashboard on VPS → no 429 errors in console
+4. Kill WebSocket connection → dashboard should still work via HTTP polling without hitting rate limit
 
 ## Checklist
 

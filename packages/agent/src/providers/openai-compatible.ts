@@ -152,9 +152,12 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
       }),
     };
 
+    // Reasoner models (e.g. deepseek-reasoner) don't support temperature or tools
+    const isReasonerModel = request.model.includes('reasoner');
+
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
-    if (request.temperature !== undefined) body['temperature'] = Math.min(request.temperature, this.maxTemperature);
-    if (request.tools && request.tools.length > 0) {
+    if (request.temperature !== undefined && !isReasonerModel) body['temperature'] = Math.min(request.temperature, this.maxTemperature);
+    if (request.tools && request.tools.length > 0 && !isReasonerModel) {
       body['tools'] = request.tools.map(t => ({
         type: 'function',
         function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -256,8 +259,10 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
       stream: true,
     };
 
+    const isReasonerModel = request.model.includes('reasoner');
+
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
-    if (request.temperature !== undefined) body['temperature'] = Math.min(request.temperature, this.maxTemperature);
+    if (request.temperature !== undefined && !isReasonerModel) body['temperature'] = Math.min(request.temperature, this.maxTemperature);
     Object.assign(body, this.extraBody);
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
