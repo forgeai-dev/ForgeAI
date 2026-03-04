@@ -1,5 +1,8 @@
 import { OpenAICompatibleProvider } from './openai-compatible.js';
 import type { ProviderBalance } from './base.js';
+import type { LLMRequest, LLMResponse } from '@forgeai/shared';
+
+const DEEPSEEK_MAX_TOKENS = 8192;
 
 export class DeepSeekProvider extends OpenAICompatibleProvider {
   constructor(apiKey?: string) {
@@ -13,6 +16,21 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
         'deepseek-reasoner',
       ],
     }, apiKey);
+  }
+
+  private clampRequest(request: LLMRequest): LLMRequest {
+    if (request.maxTokens && request.maxTokens > DEEPSEEK_MAX_TOKENS) {
+      return { ...request, maxTokens: DEEPSEEK_MAX_TOKENS };
+    }
+    return request;
+  }
+
+  async chat(request: LLMRequest): Promise<LLMResponse> {
+    return super.chat(this.clampRequest(request));
+  }
+
+  async *chatStream(request: LLMRequest): AsyncGenerator<string, LLMResponse> {
+    return yield* super.chatStream(this.clampRequest(request));
   }
 
   async getBalance(): Promise<ProviderBalance> {
