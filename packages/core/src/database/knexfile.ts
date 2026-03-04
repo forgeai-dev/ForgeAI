@@ -13,7 +13,8 @@ const knexConfig: Knex.Config = {
     password: process.env['MYSQL_PASSWORD'] || '',
     database: process.env['MYSQL_DATABASE'] || 'forgeai',
     charset: 'utf8mb4',
-  },
+    allowPublicKeyRetrieval: true,
+  } as Record<string, unknown>,
   pool: {
     min: 2,
     max: 10,

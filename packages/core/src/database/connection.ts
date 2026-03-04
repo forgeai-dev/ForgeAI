@@ -15,7 +15,9 @@ function buildKnexConfig(): Knex.Config {
       password: process.env['MYSQL_PASSWORD'] || '',
       database: process.env['MYSQL_DATABASE'] || 'forgeai',
       charset: 'utf8mb4',
-    },
+      // mysql2-specific: allow RSA key retrieval for caching_sha2_password over TCP without SSL
+      allowPublicKeyRetrieval: true,
+    } as Record<string, unknown>,
     pool: {
       min: 2,
       max: 10,
