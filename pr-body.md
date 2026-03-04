@@ -1,11 +1,11 @@
 ## Description
 
-Update DeepSeek provider to V3.2 pricing and models. Remove deprecated `deepseek-coder` (merged into `deepseek-chat` since V2.5). Update pricing from old rates to V3.2 unified pricing ($0.28/$0.42 per 1M tokens for both chat and reasoner).
+Upgrade PromptOptimizer to schema v2 with pattern deduplication and aggregation. Replaces naive array storage with fingerprint-based dedup (SHA-256 patternId) and running-average aggregation. Includes automatic v1→v2 migration so existing instances upgrade seamlessly.
 
 ## Type of Change
 
-- [x] Bug fix
-- [ ] New feature
+- [ ] Bug fix
+- [x] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
 - [ ] Tests
@@ -13,17 +13,32 @@ Update DeepSeek provider to V3.2 pricing and models. Remove deprecated `deepseek
 
 ## Changes Made
 
-- **Pricing updated** (`packages/agent/src/usage-tracker.ts`): DeepSeek V3.2 unified pricing — $0.28/1M input, $0.42/1M output for both `deepseek-chat` and `deepseek-reasoner`. Removed `deepseek-coder`.
-- **Provider models** (`packages/agent/src/providers/deepseek.ts`): Removed deprecated `deepseek-coder` model.
-- **Provider meta** (`packages/core/src/gateway/chat-routes.ts`): Removed `deepseek-coder` from ALL_PROVIDERS_META.
-- **Dashboard** (`packages/dashboard/src/pages/Settings.tsx`): Updated display text to "DeepSeek Chat (V3.2), Reasoner (V3.2)".
-- **Balance API**: Already implemented — `getBalance()` calls `https://api.deepseek.com/user/balance` and converts CNY to USD.
+- **Schema versioning** (`packages/agent/src/prompt-optimizer.ts`):
+  - `CURRENT_SCHEMA_VERSION = 2` constant
+  - `save()` writes version 2 payload
+  - `load()` detects v1 data and auto-migrates (backfills `patternId`, `occurrences`, `avgScore`, `avgDuration`, `avgIterations`, `firstSeen`, `lastSeen`)
+  - Unknown versions are safely skipped with a warning
+
+- **Pattern dedup + aggregation**:
+  - `generatePatternId(category, toolSequence, keyActions)` — SHA-256 fingerprint for success patterns
+  - `generateFailurePatternId(category, failedTools)` — SHA-256 fingerprint for failure patterns
+  - `recordOutcome()` — if patternId already exists, aggregates (running averages) instead of creating duplicate
+  - `deduplicatePatterns()` — merges any remaining duplicates after migration
+  - `pruneSuccessPatterns()` — ranks by `avgScore * recency * confidence` (log-scale confidence boost for multi-occurrence patterns)
+
+- **Improved ranking**:
+  - `getRelevantPatterns()` — ranks by `avgScore * timeDecay * confidenceBoost` using `lastSeen` instead of `timestamp`
+  - `buildOptimizedContext()` — shows `[Nx proven]` badge and avg metrics in injected context
+
+- **Enhanced stats**:
+  - `getStats()` now returns `totalObservations`, `avgPatternOccurrences`, and `topPatterns` (top 5 by score*occurrences)
 
 ## How to Test
 
 1. `pnpm -r build` + `pnpm test`
-2. In Dashboard → Settings, DeepSeek should show "Chat (V3.2), Reasoner (V3.2)"
-3. Select deepseek-chat or deepseek-reasoner as active model, send a message, verify cost tracking shows correct pricing
+2. Deploy and run several agent tasks in the same category
+3. Check `prompt-optimizer.json` — patterns should aggregate (occurrences > 1) instead of duplicating
+4. Existing v1 data files auto-migrate on first load (check logs for "Migrating optimizer data v1 → v2")
 
 ## Checklist
 
@@ -31,3 +46,4 @@ Update DeepSeek provider to V3.2 pricing and models. Remove deprecated `deepseek
 - [x] Tests pass (`pnpm test`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
+- [x] Backward compatible (v1 data auto-migrates)
