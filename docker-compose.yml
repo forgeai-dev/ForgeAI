@@ -110,6 +110,8 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DOMAIN: ${DOMAIN:-localhost}
     volumes:
