@@ -29,6 +29,8 @@ export interface LLMRequest {
   thinkingBudget?: number;
   /** AbortSignal to cancel in-flight HTTP requests immediately */
   signal?: AbortSignal;
+  /** When true, disable cross-provider fallback — only use the requested provider */
+  noFallback?: boolean;
 }
 
 export interface LLMMessage {
