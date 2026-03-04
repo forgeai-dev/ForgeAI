@@ -1305,12 +1305,17 @@ If everything is correct, present your final answer now. If you find issues, mak
         success: false,
       });
 
-      // Give user a meaningful error message
+      // Give user a meaningful error message (include API error for debugging)
+      const secs = Math.round(duration / 1000);
       const userError = errMsg.includes('Invalid JSON')
-        ? `Erro: a resposta da API veio truncada/corrompida. Tente novamente com um pedido mais curto ou específico. (${Math.round(duration / 1000)}s)`
+        ? `Erro: a resposta da API veio truncada/corrompida. Tente novamente com um pedido mais curto ou específico. (${secs}s)`
         : errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')
-          ? `Erro: timeout na API (${Math.round(duration / 1000)}s). Tente novamente.`
-          : `Erro ao processar sua mensagem. Tente novamente. (${Math.round(duration / 1000)}s)`;
+          ? `Erro: timeout na API (${secs}s). Tente novamente.`
+          : errMsg.includes('API error')
+            ? `Erro da API: ${errMsg.substring(0, 300)} (${secs}s)`
+            : errMsg.includes('API key')
+              ? `Erro: API key não configurada ou inválida para ${activeProvider}. Verifique em Settings. (${secs}s)`
+              : `Erro ao processar: ${errMsg.substring(0, 200)} (${secs}s)`;
 
       return {
         id: messageId,
