@@ -107,6 +107,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       DOMAIN: ${DOMAIN:-localhost}
     volumes:
