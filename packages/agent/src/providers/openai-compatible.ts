@@ -175,6 +175,7 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
         ...this.extraHeaders,
       },
       body: JSON.stringify(body),
+      signal: request.signal,
     });
 
     if (!response.ok) {
@@ -273,6 +274,7 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
         ...this.extraHeaders,
       },
       body: JSON.stringify(body),
+      signal: request.signal,
     });
 
     if (!response.ok || !response.body) {

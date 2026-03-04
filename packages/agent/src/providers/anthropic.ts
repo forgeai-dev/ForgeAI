@@ -146,6 +146,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
       method: 'POST',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
+      signal: request.signal,
     });
 
     if (!response.ok) {
@@ -216,6 +217,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
       method: 'POST',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
+      signal: request.signal,
     });
 
     if (!response.ok || !response.body) {

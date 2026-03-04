@@ -186,6 +186,7 @@ export class AgentRuntime {
   private sessionSummarized: Set<string> = new Set();
   private progressListeners: Map<string, ProgressListener[]> = new Map();
   private abortedSessions: Set<string> = new Set();
+  private abortControllers: Map<string, AbortController> = new Map();
   private contextProvider: (() => string | null) | null = null;
   private planContextProvider: ((sessionId: string) => string | null) | null = null;
   private promptOptimizer: PromptOptimizer | null = null;
@@ -820,6 +821,11 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
       : undefined;
 
     // Step 5: Agentic tool-calling loop
+    // Create AbortController for this session so abort cancels in-flight HTTP requests
+    const abortController = new AbortController();
+    this.abortControllers.set(params.sessionId, abortController);
+    const signal = abortController.signal;
+
     try {
       let response: LLMResponse = undefined as unknown as LLMResponse;
       let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -874,6 +880,7 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
             messages: [...messages, ...toolMessages],
             temperature: this.config.temperature,
             maxTokens: this.config.maxTokens,
+            signal,
           });
           totalUsage.promptTokens += finalResponse.usage.promptTokens;
           totalUsage.completionTokens += finalResponse.usage.completionTokens;
@@ -901,7 +908,11 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
           tools,
           temperature: this.config.temperature,
           maxTokens: this.config.maxTokens,
+          signal,
         });
+
+        // Check abort right after LLM call returns
+        if (this.abortedSessions.has(params.sessionId)) continue;
 
         // Accumulate usage
         totalUsage.promptTokens += response.usage.promptTokens;
@@ -1187,7 +1198,8 @@ If everything is correct, present your final answer now. If you find issues, mak
         timestamp: Date.now(),
       });
 
-      // Clean up progress + listeners after 5s
+      // Clean up AbortController + progress + listeners after 5s
+      this.abortControllers.delete(params.sessionId);
       setTimeout(() => {
         this.sessionProgress.delete(params.sessionId);
         this.progressListeners.delete(params.sessionId);
@@ -1286,7 +1298,30 @@ If everything is correct, present your final answer now. If you find issues, mak
       };
     } catch (error) {
       const duration = Date.now() - startTime;
+      this.abortControllers.delete(params.sessionId);
       const errMsg = error instanceof Error ? error.message : String(error);
+
+      // If aborted by user, return clean abort message instead of error
+      if (this.abortedSessions.has(params.sessionId) || (error instanceof Error && error.name === 'AbortError')) {
+        this.abortedSessions.delete(params.sessionId);
+        logger.info('Session aborted (caught in error handler)', { sessionId: params.sessionId });
+        this.updateProgress(params.sessionId, { status: 'aborted', currentTool: undefined, currentArgs: undefined });
+        this.emitProgress(params.sessionId, {
+          type: 'done', sessionId: params.sessionId, agentId: this.config.id,
+          result: { content: '⏹️ Execução interrompida pelo usuário.', model: 'system', duration },
+          timestamp: Date.now(),
+        });
+        return {
+          id: messageId,
+          content: '⏹️ Execução interrompida pelo usuário.',
+          model: activeModel,
+          provider: activeProvider,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          blocked: false,
+          duration,
+        };
+      }
+
       logger.error('LLM request failed', {
         sessionId: params.sessionId,
         durationMs: duration,
@@ -1537,14 +1572,21 @@ If everything is correct, present your final answer now. If you find issues, mak
   }
 
   /**
-   * Abort a running session. The agentic loop will stop at the next iteration boundary.
+   * Abort a running session immediately.
+   * Cancels in-flight HTTP requests via AbortController and flags the session.
    * Returns true if the session was found and abort was signaled.
    */
   abortSession(sessionId: string): boolean {
     const progress = this.sessionProgress.get(sessionId);
     if (progress && progress.status !== 'done' && progress.status !== 'aborted') {
       this.abortedSessions.add(sessionId);
-      logger.info('Abort requested for session', { sessionId });
+      // Cancel in-flight HTTP requests immediately
+      const controller = this.abortControllers.get(sessionId);
+      if (controller) {
+        controller.abort();
+        this.abortControllers.delete(sessionId);
+      }
+      logger.info('Abort requested for session (signal sent)', { sessionId });
       return true;
     }
     return false;

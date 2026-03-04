@@ -195,12 +195,31 @@ export class LLMRouter {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
+        // Non-retryable errors: throw immediately (no retry, no delay)
         if (error instanceof LLMProviderError && !error.retryable) throw error;
+
+        // Rate limit (429): don't retry same provider, fall through to next immediately
+        if (error instanceof LLMProviderError && error.statusCode === 429) {
+          logger.info(`Rate limited by ${provider.name}, skipping retries → failover`);
+          throw error;
+        }
+
+        // Abort: propagate immediately
+        if (request.signal?.aborted) throw lastError;
 
         if (attempt < this.maxRetries) {
           const delay = Math.pow(2, attempt) * 1000;
           logger.debug(`Retry ${attempt + 1}/${this.maxRetries} in ${delay}ms`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, delay);
+            // Cancel retry delay if aborted
+            if (request.signal) {
+              request.signal.addEventListener('abort', () => {
+                clearTimeout(timer);
+                reject(new Error('Aborted'));
+              }, { once: true });
+            }
+          });
         }
       }
     }

@@ -120,6 +120,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: request.signal,
     });
 
     if (!response.ok) {
@@ -187,6 +188,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
+      signal: request.signal,
       body: JSON.stringify(body),
     });
 

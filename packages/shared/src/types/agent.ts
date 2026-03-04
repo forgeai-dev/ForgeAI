@@ -27,6 +27,8 @@ export interface LLMRequest {
   stream?: boolean;
   thinking?: ThinkingLevel;
   thinkingBudget?: number;
+  /** AbortSignal to cancel in-flight HTTP requests immediately */
+  signal?: AbortSignal;
 }
 
 export interface LLMMessage {
