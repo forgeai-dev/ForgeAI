@@ -28,12 +28,18 @@ interface OpenAIMessage {
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
 }
 
+interface OpenAIToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
 interface OpenAIResponse {
   id: string;
   model: string;
   choices: Array<{
     index: number;
-    message: { role: string; content: string };
+    message: { role: string; content: string | null; tool_calls?: OpenAIToolCall[] };
     finish_reason: string;
   }>;
   usage: {
@@ -97,8 +103,15 @@ export class OpenAIProvider implements LLMProviderAdapter {
 
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
     if (request.temperature !== undefined) body['temperature'] = request.temperature;
+    // Send tools in OpenAI format
+    if (request.tools && request.tools.length > 0) {
+      body['tools'] = request.tools.map(t => ({
+        type: 'function',
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      }));
+    }
 
-    logger.debug('OpenAI request', { model: request.model });
+    logger.debug('OpenAI request', { model: request.model, tools: request.tools?.length ?? 0 });
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -122,17 +135,26 @@ export class OpenAIProvider implements LLMProviderAdapter {
       throw new LLMProviderError('openai', 'No choices in response');
     }
 
+    // Parse tool_calls if present
+    const toolCalls = choice.message.tool_calls?.map(tc => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: this.safeParseArgs(tc.function.arguments, tc.function.name),
+    }));
+
     logger.debug('OpenAI response', {
       model: data.model,
       promptTokens: data.usage.prompt_tokens,
       completionTokens: data.usage.completion_tokens,
+      toolCalls: toolCalls?.length ?? 0,
     });
 
     return {
       id: data.id,
       model: data.model,
       provider: 'openai',
-      content: choice.message.content,
+      content: choice.message.content || '',
+      toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
       usage: {
         promptTokens: data.usage.prompt_tokens,
         completionTokens: data.usage.completion_tokens,
@@ -249,6 +271,15 @@ export class OpenAIProvider implements LLMProviderAdapter {
       }
       return msg;
     });
+  }
+
+  private safeParseArgs(argsStr: string, toolName: string): Record<string, unknown> {
+    try {
+      return JSON.parse(argsStr || '{}');
+    } catch {
+      logger.warn(`Failed to parse tool args for ${toolName}`, { argsLength: argsStr.length });
+      return { _raw: argsStr.substring(0, 2000) };
+    }
   }
 
   private mapFinishReason(reason: string): LLMResponse['finishReason'] {

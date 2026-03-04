@@ -20,11 +20,26 @@ interface AnthropicMessage {
   content: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>;
 }
 
+interface AnthropicToolUseBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
 interface AnthropicResponse {
   id: string;
   type: string;
   role: string;
-  content: Array<{ type: string; text?: string }>;
+  content: AnthropicContentBlock[];
   model: string;
   stop_reason: string;
   usage: {
@@ -116,8 +131,16 @@ export class AnthropicProvider implements LLMProviderAdapter {
     if (request.temperature !== undefined) {
       body['temperature'] = request.temperature;
     }
+    // Send tools in Anthropic format
+    if (request.tools && request.tools.length > 0) {
+      body['tools'] = request.tools.map(t => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      }));
+    }
 
-    logger.debug('Anthropic request', { model: request.model });
+    logger.debug('Anthropic request', { model: request.model, tools: request.tools?.length ?? 0 });
 
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
@@ -141,10 +164,19 @@ export class AnthropicProvider implements LLMProviderAdapter {
       .map(c => c.text)
       .join('');
 
+    // Parse tool_use blocks from response
+    const toolUseBlocks = data.content.filter(c => c.type === 'tool_use') as AnthropicToolUseBlock[];
+    const toolCalls = toolUseBlocks.length > 0 ? toolUseBlocks.map(tc => ({
+      id: tc.id,
+      name: tc.name,
+      arguments: tc.input,
+    })) : undefined;
+
     logger.debug('Anthropic response', {
       model: data.model,
       inputTokens: data.usage.input_tokens,
       outputTokens: data.usage.output_tokens,
+      toolCalls: toolCalls?.length ?? 0,
     });
 
     return {
@@ -152,12 +184,13 @@ export class AnthropicProvider implements LLMProviderAdapter {
       model: data.model,
       provider: 'anthropic',
       content,
+      toolCalls,
       usage: {
         promptTokens: data.usage.input_tokens,
         completionTokens: data.usage.output_tokens,
         totalTokens: data.usage.input_tokens + data.usage.output_tokens,
       },
-      finishReason: data.stop_reason === 'end_turn' ? 'stop' : 'length',
+      finishReason: data.stop_reason === 'tool_use' ? 'tool_calls' : data.stop_reason === 'end_turn' ? 'stop' : 'length',
     };
   }
 
@@ -259,6 +292,29 @@ export class AnthropicProvider implements LLMProviderAdapter {
     return messages
       .filter(m => m.role !== 'system')
       .map(m => {
+        // Tool result messages → Anthropic tool_result content block
+        if (m.role === 'tool' && m.tool_call_id) {
+          return {
+            role: 'user' as const,
+            content: [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: m.content }],
+          };
+        }
+        // Assistant messages with tool_calls → reconstruct tool_use content blocks
+        if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+          const blocks: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }> = [];
+          if (m.content) blocks.push({ type: 'text', text: m.content });
+          for (const tc of m.tool_calls) {
+            blocks.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function?.name ?? (tc as any).name,
+              input: typeof tc.function?.arguments === 'string'
+                ? JSON.parse(tc.function.arguments)
+                : (tc as any).arguments ?? {},
+            });
+          }
+          return { role: 'assistant' as const, content: blocks };
+        }
         const role = m.role === 'assistant' ? 'assistant' as const : 'user' as const;
         // Multimodal: if message has imageData, use Anthropic content block format
         if (m.imageData && m.role === 'user') {
