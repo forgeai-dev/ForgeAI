@@ -14,7 +14,7 @@ const DEFAULT_ROUTES: ModelRoute[] = [
   { priority: 6, provider: 'groq', model: 'llama-3.3-70b-versatile', fallback: true },
   { priority: 7, provider: 'mistral', model: 'mistral-large-latest', fallback: true },
   { priority: 8, provider: 'xai', model: 'grok-3', fallback: true },
-  { priority: 9, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', fallback: true },
+  { priority: 9, provider: 'anthropic', model: 'claude-haiku-4-5-20251001', fallback: true },
   { priority: 10, provider: 'openai', model: 'gpt-4o-mini', fallback: true },
   { priority: 11, provider: 'local', model: 'llama3.1:8b', fallback: true },
 ];
@@ -70,6 +70,7 @@ export class LLMRouter {
     const chain = this.buildFallbackChain(request);
 
     let lastError: Error | null = null;
+    let primaryError: Error | null = null;
     let attempted = 0;
 
     for (const route of chain) {
@@ -91,7 +92,7 @@ export class LLMRouter {
           this._lastFailover = {
             from: { provider: primary.provider, model: primary.model },
             to: { provider: route.provider, model: route.model },
-            reason: lastError?.message ?? 'unknown',
+            reason: primaryError?.message ?? lastError?.message ?? 'unknown',
             timestamp: Date.now(),
           };
           logger.info(`⚡ Failover: ${primary.provider}/${primary.model} → ${route.provider}/${route.model}`);
@@ -102,6 +103,7 @@ export class LLMRouter {
         return response;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempted === 1) primaryError = lastError;
         this.recordCircuitFailure(route.provider);
 
         logger.warn(`Route failed: ${route.provider}/${route.model}`, {
@@ -110,12 +112,12 @@ export class LLMRouter {
           circuitFailures: this.circuits.get(route.provider)?.failures ?? 0,
         });
 
-        // Non-fallback + non-retryable → still continue to fallback chain
         continue;
       }
     }
 
-    throw lastError ?? new Error('No LLM providers available');
+    // Throw the primary (user's chosen model) error if available, not the last fallback error
+    throw primaryError ?? lastError ?? new Error('No LLM providers available');
   }
 
   async *chatStream(request: LLMRequest): AsyncGenerator<string, LLMResponse> {
