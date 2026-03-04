@@ -1566,7 +1566,7 @@ If everything is correct, present your final answer now. If you find issues, mak
   getActiveSessions(): SessionProgress[] {
     const active: SessionProgress[] = [];
     for (const progress of this.sessionProgress.values()) {
-      if (progress.status !== 'done' && progress.status !== 'idle') {
+      if (progress.status !== 'done' && progress.status !== 'idle' && progress.status !== 'aborted') {
         active.push({ ...progress, steps: [...progress.steps] });
       }
     }
@@ -1582,13 +1582,21 @@ If everything is correct, present your final answer now. If you find issues, mak
     const progress = this.sessionProgress.get(sessionId);
     if (progress && progress.status !== 'done' && progress.status !== 'aborted') {
       this.abortedSessions.add(sessionId);
+      // Immediately update status so /api/chat/active stops returning this session
+      this.updateProgress(sessionId, { status: 'aborted', currentTool: undefined, currentArgs: undefined });
+      // Emit done event so frontend gets notified instantly
+      this.emitProgress(sessionId, {
+        type: 'done', sessionId, agentId: this.config.id,
+        result: { content: '⏹️ Execução interrompida pelo usuário.', model: 'system', duration: 0 },
+        timestamp: Date.now(),
+      });
       // Cancel in-flight HTTP requests immediately
       const controller = this.abortControllers.get(sessionId);
       if (controller) {
         controller.abort();
         this.abortControllers.delete(sessionId);
       }
-      logger.info('Abort requested for session (signal sent)', { sessionId });
+      logger.info('Abort requested for session (signal sent, status set to aborted)', { sessionId });
       return true;
     }
     return false;
