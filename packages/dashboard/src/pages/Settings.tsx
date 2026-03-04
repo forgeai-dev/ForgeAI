@@ -560,9 +560,30 @@ export function SettingsPage() {
                       <span className="text-sm text-white">{site.name}</span>
                       {site.port && <span className="text-[10px] text-zinc-500">:{site.port}</span>}
                     </div>
-                    <a href={site.url} target="_blank" rel="noopener noreferrer" className="text-xs text-forge-400 hover:text-forge-300 flex items-center gap-1">
-                      {site.url.replace(/^https?:\/\//, '')} <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a href={site.url} target="_blank" rel="noopener noreferrer" className="text-xs text-forge-400 hover:text-forge-300 flex items-center gap-1">
+                        {site.url.replace(/^https?:\/\//, '')} <ExternalLink className="w-3 h-3" />
+                      </a>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Deletar "${site.name}" permanentemente? Esta ação não pode ser desfeita.`)) return;
+                          try {
+                            if (site.type === 'app') {
+                              await api.unregisterApp(site.name);
+                            } else {
+                              await api.deleteSite(site.name);
+                            }
+                            loadDomainSettings();
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : 'Erro ao deletar');
+                          }
+                        }}
+                        title={`Deletar ${site.name}`}
+                        className="p-1 rounded hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
