@@ -185,16 +185,18 @@ export class AgentManager {
    * Set tool executor for all agents.
    */
   setToolExecutor(executor: ToolExecutor): void {
-    this.toolExecutor = executor;
+    // Wrap with cache layer so all agents share a dedup cache for expensive tools
+    const cached = new CachedToolExecutor(executor);
+    this.toolExecutor = cached;
     for (const [agentId, runtime] of this.agents) {
       const def = this.agentDefs.get(agentId);
       if (def?.tools?.allow || def?.tools?.deny) {
-        runtime.setToolExecutor(new FilteredToolExecutor(executor, def.tools?.allow, def.tools?.deny));
+        runtime.setToolExecutor(new FilteredToolExecutor(cached, def.tools?.allow, def.tools?.deny));
       } else {
-        runtime.setToolExecutor(executor);
+        runtime.setToolExecutor(cached);
       }
     }
-    logger.info('Tool executor set for all agents');
+    logger.info('Tool executor set for all agents (with shared result cache)');
   }
 
   /**
@@ -724,6 +726,70 @@ export class AgentManager {
     const count = this.delegationHistory.length;
     this.delegationHistory = [];
     return count;
+  }
+}
+
+/**
+ * CachedToolExecutor — wraps a ToolExecutor with a short-lived result cache.
+ * Prevents duplicate tool calls (e.g. parent + sub-agent both calling web_browse on the same URL).
+ * Only caches read-only/idempotent tools. Cache is global (shared across all agents).
+ */
+const CACHEABLE_TOOLS = new Set(['web_browse', 'web_search']);
+const CACHE_TTL_MS = 30_000; // 30 seconds
+
+interface CacheEntry {
+  result: { success: boolean; data?: unknown; error?: string; duration: number };
+  cachedAt: number;
+}
+
+// Global cache shared across all agents in the same process
+const globalToolCache = new Map<string, CacheEntry>();
+
+// Periodic cleanup (every 60s)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of globalToolCache) {
+    if (now - entry.cachedAt > CACHE_TTL_MS * 2) {
+      globalToolCache.delete(key);
+    }
+  }
+}, 60_000);
+
+class CachedToolExecutor implements ToolExecutor {
+  private inner: ToolExecutor;
+
+  constructor(inner: ToolExecutor) {
+    this.inner = inner;
+  }
+
+  listForLLM() {
+    return this.inner.listForLLM();
+  }
+
+  async execute(name: string, params: Record<string, unknown>, userId?: string) {
+    // Only cache idempotent read-only tools
+    if (!CACHEABLE_TOOLS.has(name)) {
+      return this.inner.execute(name, params, userId);
+    }
+
+    // Build cache key from tool name + sorted args (exclude internal fields)
+    const cacheArgs = { ...params };
+    delete cacheArgs['_sessionId'];
+    const cacheKey = `${name}:${JSON.stringify(cacheArgs, Object.keys(cacheArgs).sort())}`;
+
+    // Check cache
+    const cached = globalToolCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      logger.info(`⚡ Cache hit for ${name} (${Math.round((Date.now() - cached.cachedAt) / 1000)}s old)`);
+      return { ...cached.result, duration: 0 };
+    }
+
+    // Execute and cache
+    const result = await this.inner.execute(name, params, userId);
+    if (result.success) {
+      globalToolCache.set(cacheKey, { result, cachedAt: Date.now() });
+    }
+    return result;
   }
 }
 

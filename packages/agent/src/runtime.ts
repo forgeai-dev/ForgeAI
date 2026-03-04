@@ -12,8 +12,9 @@ export interface ToolExecutor {
   execute(name: string, params: Record<string, unknown>, userId?: string): Promise<{ success: boolean; data?: unknown; error?: string; duration: number }>;
 }
 
-// No iteration limit — the agent runs until the task is complete.
-// Only stuck-loop detection (duplicate calls) serves as safety.
+// Safety cap: hard limit on tool-calling iterations to prevent runaway loops.
+// The agent can still finish earlier (no tool calls = done). This only prevents infinite spinning.
+const DEFAULT_MAX_ITERATIONS = 50;
 const MAX_RESULT_CHARS = 1500;
 
 const logger = createLogger('Agent:Runtime');
@@ -580,6 +581,7 @@ smart_home: Home Assistant control. Needs integration in Dashboard.
 spotify: Playback control. Needs integration in Dashboard.
 forge_team: Coordinated multi-agent teams with dependency graph. Use for 3+ specialists with dependencies.
 agent_delegate: Simple parallel sub-agents, no dependencies. Use for 1-2 independent tasks.
+ DELEGATION RULE: Trust sub-agent results. NEVER re-do work (web_browse, shell_exec, etc.) that a delegate already completed — use its returned output directly.
 sessions_list/history/send: Cross-agent communication.
 app_register: Register+start dynamic apps. ALWAYS use this (never curl to /api/apps/register).
  Managed(preferred): app_register(name,port,cwd,command,args,desc) → auto-restart+health checks.
@@ -834,7 +836,7 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
         sessionId: params.sessionId,
         status: 'thinking',
         iteration: 0,
-        maxIterations: Infinity,
+        maxIterations: DEFAULT_MAX_ITERATIONS,
         steps: steps,
         startedAt: startTime,
       });
@@ -857,6 +859,28 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
 
         iterations++;
         this.updateProgress(params.sessionId, { status: 'thinking', iteration: iterations });
+
+        // ─── Iteration cap ───
+        if (iterations > DEFAULT_MAX_ITERATIONS) {
+          logger.warn(`Iteration cap reached (${DEFAULT_MAX_ITERATIONS})`, { sessionId: params.sessionId });
+          toolMessages.push({
+            role: 'system',
+            content: `ITERATION LIMIT REACHED (${DEFAULT_MAX_ITERATIONS}). You MUST provide your final answer NOW. Summarize what was accomplished and any remaining issues.`,
+          });
+          // One last LLM call to get a final summary, then break
+          const finalResponse = await this.router.chat({
+            model: activeModel,
+            provider: activeProvider,
+            messages: [...messages, ...toolMessages],
+            temperature: this.config.temperature,
+            maxTokens: this.config.maxTokens,
+          });
+          totalUsage.promptTokens += finalResponse.usage.promptTokens;
+          totalUsage.completionTokens += finalResponse.usage.completionTokens;
+          totalUsage.totalTokens += finalResponse.usage.totalTokens;
+          response = finalResponse;
+          break;
+        }
 
         // Inject active plan context if available (refreshed each iteration)
         const iterationMessages = [...messages, ...toolMessages];

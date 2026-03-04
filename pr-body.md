@@ -1,6 +1,6 @@
 ## Description
 
-Agents page: dynamic provider/model selection from configured LLMs. Providers configured in Settings now appear automatically in Agents. Model dropdown loads available models per provider via API. System prompt field clearly indicates it's optional (uses default if empty).
+Anti-collision system: shared tool result cache, iteration cap, and delegation trust prompt. Prevents parent and sub-agents from duplicating expensive tool calls (web_browse, web_search). Adds a hard iteration limit of 50 to prevent runaway loops ([X/null] → [X/50]).
 
 ## Type of Change
 
@@ -13,35 +13,31 @@ Agents page: dynamic provider/model selection from configured LLMs. Providers co
 
 ## Changes Made
 
-- **Dynamic provider list** (`packages/dashboard/src/pages/Agents.tsx`):
-  - Fetches configured providers from `/api/providers` on mount (only `configured: true`)
-  - Provider dropdown in create and edit forms shows only configured LLMs
-  - Warning message when no providers are configured
+- **CachedToolExecutor** (`packages/agent/src/agent-manager.ts`):
+  - New `CachedToolExecutor` class wrapping the shared `ToolExecutor`
+  - Global in-process cache for `web_browse` and `web_search` results (30s TTL)
+  - Cache key = tool name + sorted JSON args (excludes internal `_sessionId`)
+  - Only caches successful results; errors always re-execute
+  - Automatic cleanup every 60s for expired entries
+  - Wired in `setToolExecutor()` — all agents (parent + sub) share the same cache
+  - Log message on cache hits for observability
 
-- **Dynamic model loading**:
-  - When a provider is selected, models are fetched from `/api/providers/:name/models`
-  - Model field changed from free-text `<input>` to `<select>` dropdown
-  - Models are cached per provider to avoid redundant API calls
-  - Model resets when provider changes
+- **Iteration cap** (`packages/agent/src/runtime.ts`):
+  - `DEFAULT_MAX_ITERATIONS = 50` replaces `Infinity`
+  - Progress tracking shows `[X/50]` instead of `[X/null]`
+  - On cap: injects "ITERATION LIMIT REACHED" system message, does one final LLM call for summary, then breaks
+  - Prevents runaway 30+ minute sessions
 
-- **Edit mode improvements**:
-  - Edit form now includes provider and model dropdowns (previously only name/persona)
-  - `handleUpdate` sends model and provider changes to API
-  - Pre-loads models for agent's current provider when entering edit mode
-
-- **UX: Optional system prompt**:
-  - Label shows "(opcional — se vazio, usa o prompt padrão do ForgeAI)"
-  - Placeholder explains it's optional and defaults to the standard prompt
+- **Delegation trust prompt** (`packages/agent/src/runtime.ts`):
+  - Added to system prompt: "Trust sub-agent results. NEVER re-do work that a delegate already completed — use its returned output directly."
+  - Reduces redundant verification by the parent agent after delegation
 
 ## How to Test
 
 1. `pnpm -r build`
-2. Configure a provider API key in Settings
-3. Go to Agents → click "+ Novo Agente"
-4. Provider dropdown should list only configured providers
-5. Select a provider → Model dropdown should populate with that provider's models
-6. Leave Persona empty → confirm placeholder indicates it's optional
-7. Edit an existing agent → confirm provider/model dropdowns work
+2. Delegate a task (agent_delegate) that uses web_browse
+3. Check logs for "⚡ Cache hit" when parent re-browses same URL
+4. Verify progress shows `[X/50]` max instead of `[X/null]`
 
 ## Checklist
 
