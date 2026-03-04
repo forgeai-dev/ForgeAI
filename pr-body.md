@@ -1,10 +1,10 @@
 ## Description
 
-Anti-collision system: shared tool result cache, iteration cap, and delegation trust prompt. Prevents parent and sub-agents from duplicating expensive tool calls (web_browse, web_search). Adds a hard iteration limit of 50 to prevent runaway loops ([X/null] → [X/50]).
+Delete sites/apps from Dashboard Settings. Each site/app row now has a trash icon button with confirmation dialog. Static sites are deleted via new `DELETE /api/sites/:name` endpoint (removes workspace directory). Apps use existing `DELETE /api/apps/registry/:name`.
 
 ## Type of Change
 
-- [x] Bug fix
+- [ ] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
@@ -13,31 +13,28 @@ Anti-collision system: shared tool result cache, iteration cap, and delegation t
 
 ## Changes Made
 
-- **CachedToolExecutor** (`packages/agent/src/agent-manager.ts`):
-  - New `CachedToolExecutor` class wrapping the shared `ToolExecutor`
-  - Global in-process cache for `web_browse` and `web_search` results (30s TTL)
-  - Cache key = tool name + sorted JSON args (excludes internal `_sessionId`)
-  - Only caches successful results; errors always re-execute
-  - Automatic cleanup every 60s for expired entries
-  - Wired in `setToolExecutor()` — all agents (parent + sub) share the same cache
-  - Log message on cache hits for observability
+- **Backend: `DELETE /api/sites/:name`** (`packages/core/src/gateway/chat-routes.ts`):
+  - New endpoint to delete static sites from workspace
+  - Security: validates name, prevents directory traversal
+  - Removes the entire site directory recursively
 
-- **Iteration cap** (`packages/agent/src/runtime.ts`):
-  - `DEFAULT_MAX_ITERATIONS = 50` replaces `Infinity`
-  - Progress tracking shows `[X/50]` instead of `[X/null]`
-  - On cap: injects "ITERATION LIMIT REACHED" system message, does one final LLM call for summary, then breaks
-  - Prevents runaway 30+ minute sessions
+- **Dashboard API** (`packages/dashboard/src/lib/api.ts`):
+  - Added `deleteSite(name)` method
 
-- **Delegation trust prompt** (`packages/agent/src/runtime.ts`):
-  - Added to system prompt: "Trust sub-agent results. NEVER re-do work that a delegate already completed — use its returned output directly."
-  - Reduces redundant verification by the parent agent after delegation
+- **Dashboard UI** (`packages/dashboard/src/pages/Settings.tsx`):
+  - Added trash icon (Trash2) button to each site/app row
+  - Confirmation dialog before deletion
+  - Calls `api.unregisterApp()` for apps, `api.deleteSite()` for sites
+  - Auto-refreshes the list after deletion
 
 ## How to Test
 
 1. `pnpm -r build`
-2. Delegate a task (agent_delegate) that uses web_browse
-3. Check logs for "⚡ Cache hit" when parent re-browses same URL
-4. Verify progress shows `[X/50]` max instead of `[X/null]`
+2. Go to Settings → Domain & Sites section
+3. Click the trash icon next to any site/app
+4. Confirm the deletion dialog
+5. Verify the site/app is removed from the list
+6. Verify the URL no longer serves content
 
 ## Checklist
 
