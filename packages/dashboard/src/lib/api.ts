@@ -290,4 +290,6 @@ export const api = {
     }),
   unregisterApp: (name: string) =>
     request<{ deleted: boolean; name: string }>(`/api/apps/registry/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  deleteSite: (name: string) =>
+    request<{ deleted: boolean; name: string }>(`/api/sites/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };

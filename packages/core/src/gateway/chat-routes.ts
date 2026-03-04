@@ -3579,6 +3579,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
   });
 
+  // ─── Delete Static Site ─────────────────────────────
+  app.delete('/api/sites/:name', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { name } = request.params as { name: string };
+    if (!name || /[/\\]/.test(name)) {
+      reply.status(400).send({ error: 'Invalid site name' }); return;
+    }
+
+    const { resolve, normalize, sep } = await import('node:path');
+    const { existsSync, rmSync } = await import('node:fs');
+    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const siteDir = resolve(workspaceDir, name);
+
+    // Security: prevent directory traversal
+    if (!normalize(siteDir).startsWith(workspaceDir + sep)) {
+      reply.status(403).send({ error: 'Access denied' }); return;
+    }
+
+    if (!existsSync(siteDir)) {
+      reply.status(404).send({ error: `Site "${name}" not found` }); return;
+    }
+
+    rmSync(siteDir, { recursive: true, force: true });
+    logger.info('Static site deleted', { name });
+    return { deleted: true, name };
+  });
+
   // ─── App Manager ─────────────────────────────────
 
   appManager = createAppManager({ maxRestarts: 5, healthCheckIntervalMs: 30_000 });
