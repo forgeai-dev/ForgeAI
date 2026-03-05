@@ -4024,9 +4024,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { resources: mcpClient.getResources() };
   });
 
-  // ─── Long-term Memory ─────────────────────────────────
+  // ─── Long-term Memory (MySQL-persistent) ─────────────
 
   memoryManager = createMemoryManager();
+
+  // Attach MySQL persistence for durable cross-session memory
+  try {
+    const { getDatabase } = await import('../database/connection.js');
+    const { createMemoryStore } = await import('../database/memory-store.js');
+    const db = getDatabase();
+    const memStore = createMemoryStore(db);
+    memoryManager.setPersistence(memStore);
+
+    // Enable OpenAI embeddings if API key is available
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey) {
+      memoryManager.setOpenAIKey(openaiKey);
+    }
+
+    // Load existing memories from MySQL into cache
+    await memoryManager.initialize();
+    logger.info('Memory system initialized with MySQL persistence');
+  } catch (memErr) {
+    logger.warn('MySQL memory persistence not available, running in-memory only', {
+      error: memErr instanceof Error ? memErr.message : String(memErr),
+    });
+  }
 
   // Attach memory manager to all agents for cross-session memory
   if (agentManager) {

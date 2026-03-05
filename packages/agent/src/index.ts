@@ -24,7 +24,7 @@ export type { TTSAdapter, STTAdapter } from './voice-engine.js';
 export { MCPClient, createMCPClient } from './mcp-client.js';
 export type { MCPServerConfig, MCPTool, MCPResource, MCPPrompt, MCPCallResult } from './mcp-client.js';
 export { MemoryManager, createMemoryManager } from './memory-manager.js';
-export type { MemoryEntry, MemorySearchResult, MemoryConfig } from './memory-manager.js';
+export type { MemoryEntry, MemorySearchResult, MemoryConfig, MemoryEntity, MemoryPersistence, EmbeddingProviderType } from './memory-manager.js';
 export { RAGEngine, createRAGEngine, extractTextFromFile } from './rag-engine.js';
 export type { RAGDocument, RAGChunk, RAGSearchResult, RAGConfig, EmbeddingProvider } from './rag-engine.js';
 export { AutoPlanner, createAutoPlanner } from './auto-planner.js';

@@ -266,7 +266,7 @@ The dashboard is a full-featured React 19 SPA served directly by the Gateway. No
 | **Workspace** | Live editor for 5 prompt files: AGENTS.md, SOUL.md, IDENTITY.md, USER.md, AUTOPILOT.md |
 | **Gmail** | Inbox viewer (paginated), compose with To/Subject/Body, search, mark read/unread, thread view |
 | **Calendar** | Google Calendar integration: list/create/edit/delete events, quick add (natural language), free/busy check |
-| **Memory** | Cross-session memory browser, semantic search (TF-IDF), importance scoring, consolidate duplicates |
+| **Memory** | Cross-session memory browser (MySQL-persistent), semantic search (OpenAI embeddings + TF-IDF fallback), importance scoring, entity extraction, consolidate duplicates |
 | **API Keys** | Create keys with 12 granular scopes, set expiration (days), view usage count, revoke/delete |
 | **Webhooks** | Outbound webhooks (URL + events), inbound webhooks (path + handler), event log with status/duration/timestamp |
 | **Audit Log** | Security event viewer with risk level color coding, action filtering, detail expansion |
@@ -503,9 +503,17 @@ Create multiple agents with different models, providers, personas, and tool perm
 </details>
 
 <details>
-<summary><b>Cross-Session Memory</b></summary>
+<summary><b>Cross-Session Memory (MySQL-Persistent)</b></summary>
 
-TF-IDF-based memory that persists across sessions. The agent automatically stores important context and injects relevant memories into new conversations. Consolidation removes duplicates and merges related entries.
+Durable cross-session memory backed by **MySQL** with real **OpenAI embeddings** (`text-embedding-3-small`). Memory survives server restarts, Docker rebuilds, and deployments. The agent automatically stores learnings, session summaries, and user preferences — and injects relevant memories into new conversations via semantic search.
+
+- **MySQL persistence** — `memory_entries` + `memory_entities` tables (auto-migrated on startup)
+- **OpenAI embeddings** — semantic similarity search (auto-enabled if `OPENAI_API_KEY` is set)
+- **TF-IDF fallback** — works without any API key (graceful degradation)
+- **Entity extraction** — technologies, projects, URLs, file paths auto-extracted into structured entities
+- **Hybrid architecture** — in-memory cache for fast search (<1ms) + MySQL for durability
+- **Importance scoring** — learnings and user preferences weighted higher, low-importance entries auto-evicted
+- **Consolidation** — deduplicates near-identical memories, persists removals
 
 </details>
 
@@ -775,10 +783,11 @@ API endpoints:
                                           │
                     ┌─────────────────────▼──────────────────────┐
                     │              PERSISTENCE                     │
-                    │  MySQL 8 (Knex.js) · 10 tables               │
+                    │  MySQL 8 (Knex.js) · 12 tables               │
                     │  Credential Vault (AES-256-GCM, file-based)  │
                     │  Chat History (JSON, session-based)           │
-                    │  Memory Store (TF-IDF vectors)                │
+                    │  Memory Store (MySQL + OpenAI embeddings)     │
+                    │  Entity Store (auto-extracted knowledge)      │
                     │  RAG Engine (chunked embeddings)              │
                     └─────────────────────────────────────────────┘
 ```
@@ -975,7 +984,7 @@ All core features are implemented and tested:
 - **Dashboard** — 19 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
-- **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent, **Forge Teams**, **Prompt Optimizer**
+- **Advanced** — RAG, AutoPlanner, Workflows, **Persistent Memory (MySQL + OpenAI embeddings)**, Autopilot, DM Pairing, Multi-Agent, **Forge Teams**, **Prompt Optimizer**
 - **Infrastructure** — Docker (Python 3 + Node.js 22 + Chromium), CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, Jetson, BeagleBone, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
@@ -999,6 +1008,7 @@ All core features are implemented and tested:
 - **Forge Teams (Coordinated Agent Teams)** — `forge_team` tool for creating coordinated teams of specialist agents with dependency graphs. Independent tasks run in parallel; dependent tasks wait and receive upstream outputs as context. Up to 5 workers per team, 2 concurrent teams. Dashboard visibility via `/api/teams/active`. Inspired by Claude Code's Agent Teams
 - **Adaptive Prompt Optimizer** — Native DSPy-inspired auto-optimization. Classifies tasks into 9 categories, records success/failure patterns with scores, injects proven strategies + anti-patterns into prompts for similar future tasks. Persists to JSON, auto-saves every 60s, temporal decay for old patterns
 - **Full Installation Freedom** — Docker image includes Python 3, pip, venv, curl, git alongside Node.js 22 and Chromium. Agent has explicit instructions to install ANY missing dependency (languages, libraries, tools) with full root access. Never substitutes technologies — if user asks for Flask, agent installs Flask
+- **Persistent Memory System** — MySQL-backed cross-session memory with real OpenAI embeddings (`text-embedding-3-small`) and TF-IDF fallback. `memory_entries` + `memory_entities` tables (migration 006, auto-applied). Entity extraction (technologies, projects, URLs, file paths). Hybrid architecture: in-memory cache for fast semantic search + MySQL for durable persistence. Graceful degradation: no OpenAI key → TF-IDF, no MySQL → in-memory only. Zero breaking changes to existing MemoryManager API
 
 ### What's Next
 
@@ -1022,6 +1032,7 @@ All core features are implemented and tested:
 | ~~Task Delegation (parallel sub-agents)~~ | ✅ Done |
 | ~~Execution Planning tools~~ | ✅ Done |
 | ~~Python + multi-language support in Docker~~ | ✅ Done |
+| ~~Persistent Memory (MySQL + OpenAI embeddings + entities)~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |
@@ -1053,7 +1064,7 @@ pnpm test    # 38 E2E tests
 | **Language** | TypeScript (strict mode) |
 | **Runtime** | Node.js ≥ 22 |
 | **Gateway** | Fastify 5 + WebSocket |
-| **Database** | MySQL 8 via Knex.js (10 tables) |
+| **Database** | MySQL 8 via Knex.js (12 tables) |
 | **Encryption** | AES-256-GCM, PBKDF2 (310k iter), bcrypt, HMAC-SHA256 |
 | **Auth** | JWT (access + refresh + rotation) + TOTP 2FA + Email OTP (external) |
 | **Dashboard** | React 19, Vite 6, TailwindCSS 4, Lucide Icons |

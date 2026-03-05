@@ -1,11 +1,11 @@
 # 🔥 ForgeAI — Development Roadmap
 
 > Full development history and future plans.
-> Last updated: 2026-02-16
+> Last updated: 2026-03-05
 
 ---
 
-## Status Atual — 22 Fases Completas
+## Status Atual — 23 Fases Completas
 
 ### Fase 1 ✅ — Core + Security + CLI + MySQL
 - `@forgeai/shared` — Types, utils, constants
@@ -71,7 +71,7 @@
 > ✅ Todos os itens desta seção já foram implementados:
 > - Agent-to-Agent sessions → **Fase 15** (sessions_list, sessions_history, sessions_send)
 > - MCP (Model Context Protocol) → **Fase 13** (MCPClient, tool servers HTTP/SSE/stdio)
-> - Memory de longo prazo → **Fase 13+16** (MemoryManager TF-IDF + Cross-Session Memory)
+> - Memory de longo prazo → **Fase 13+16+34** (MemoryManager TF-IDF + Cross-Session Memory + MySQL Persistence + OpenAI Embeddings)
 > - RAG → **Fase 14** (RAGEngine, chunked embeddings, cosine similarity)
 > - Function calling nativo → **Fase 15** (Agentic Loop, 25 iterations, tool_calls/tool results)
 > - Auto-planning → **Fase 14** (AutoPlanner, dependency graph, parallel execution)
@@ -233,6 +233,27 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 ---
 
 ## Roadmap — Fases Completas
+
+### Fase 34 ✅ — Persistent Memory System (MySQL + OpenAI Embeddings)
+- **MySQL-Backed Memory Persistence** — Memória do agente agora persiste no MySQL:
+  - Migration 006: `memory_entries` + `memory_entities` tables (auto-applied on startup)
+  - `MemoryStore` em `packages/core/src/database/memory-store.ts` — MySQL CRUD layer
+  - `MemoryManager` reescrito em `packages/agent/src/memory-manager.ts` — persistência + embeddings reais
+  - Wired em `packages/core/src/gateway/chat-routes.ts` — MySQL attach + OpenAI key auto-detect
+- **OpenAI Embeddings** (`text-embedding-3-small`) — busca semântica real:
+  - Auto-enabled se `OPENAI_API_KEY` estiver configurada
+  - `storeAsync()` e `searchAsync()` para precisão máxima
+  - TF-IDF fallback se não tiver chave OpenAI (zero breaking changes)
+- **Entity Extraction** — extração automática de entidades:
+  - Tecnologias (React, Docker, MySQL, etc.), projetos (ForgeAI, GitHub, etc.)
+  - URLs, file paths → tabela `memory_entities` com tipo + atributos
+- **Hybrid Architecture** — cache in-memory para busca rápida (<1ms) + MySQL para durabilidade
+- **Graceful Degradation** — sem MySQL? in-memory. Sem OpenAI key? TF-IDF. Tudo continua funcionando
+- **MemoryPersistence interface** — adapter pattern para desacoplar agent ↔ core (sem dependência circular)
+- Zero breaking changes na API pública do MemoryManager
+- Exports: `MemoryStore`, `createMemoryStore`, `MemoryEntryRow`, `MemoryEntityRow` (core)
+- Exports: `MemoryEntity`, `MemoryPersistence`, `EmbeddingProviderType` (agent)
+- **12 tabelas MySQL**, **150+ API endpoints**
 
 ### Fase 22 ✅ — Calendar + Notion + OpenTelemetry
 - **Google Calendar Integration** — REST API completa:
@@ -461,7 +482,7 @@ forgeai/
 | Language | TypeScript (strict mode) |
 | Runtime | Node.js ≥ 22 |
 | Gateway | Fastify 5 + WebSocket |
-| Database | MySQL 8 (Knex.js, 10 tables) |
+| **Database** | MySQL 8 (Knex.js, 12 tables) |
 | Encryption | AES-256-GCM, PBKDF2, bcrypt, HMAC-SHA256 |
 | Auth | JWT (access + refresh) + TOTP (2FA) + OAuth2 (Google/GitHub/Microsoft) |
 | Dashboard | React 19, Vite 6, TailwindCSS, Lucide Icons, Recharts |
@@ -476,4 +497,4 @@ forgeai/
 
 ---
 
-**Stats: 7 channels, 11 tools, 8 LLM providers, 16 dashboard pages, 140+ API endpoints, 7 security modules, 5 integrations, 38 E2E tests.**
+**Stats: 8 channels, 19 tools, 10 LLM providers, 19 dashboard pages, 150+ API endpoints, 9 security modules, 5 integrations, 53+ E2E tests, 12 MySQL tables.**

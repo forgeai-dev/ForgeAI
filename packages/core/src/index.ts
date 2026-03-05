@@ -19,3 +19,5 @@ export { ArtifactManager, createArtifactManager } from './artifact/artifact-mana
 export { SessionRecorder, createSessionRecorder } from './recording/session-recorder.js';
 export { FingerprintStore } from './database/fingerprint-store.js';
 export type { StoredFingerprint } from './database/fingerprint-store.js';
+export { MemoryStore, createMemoryStore } from './database/memory-store.js';
+export type { MemoryEntryRow, MemoryEntityRow } from './database/memory-store.js';

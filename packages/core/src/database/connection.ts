@@ -112,6 +112,14 @@ export async function runMigrations(): Promise<void> {
       logger.info('Migration 005_element_fingerprints applied');
     }
 
+    // Migration 6: Memory System (persistent memory + entities)
+    if (currentVersion < 6) {
+      logger.info('Applying migration 006_memory_system...');
+      await applyMigration006(database);
+      await database('forgeai_migrations').insert({ version: 6, name: '006_memory_system' });
+      logger.info('Migration 006_memory_system applied');
+    }
+
     logger.info('All migrations applied successfully');
   } catch (error) {
     logger.error('Migration failed', error);
@@ -314,6 +322,49 @@ async function applyMigration005(db: Knex): Promise<void> {
     // Prefix index for URL (191 chars max for utf8mb4 within 3072-byte key limit)
     await db.raw('CREATE INDEX `element_fingerprints_url_index` ON `element_fingerprints` (`url`(191))');
     logger.info('Created element_fingerprints table');
+  }
+}
+
+async function applyMigration006(db: Knex): Promise<void> {
+  const hasMemoryEntries = await db.schema.hasTable('memory_entries');
+  if (!hasMemoryEntries) {
+    await db.schema.createTable('memory_entries', (table) => {
+      table.string('id', 64).primary();
+      table.text('content').notNullable();
+      table.json('embedding_json').nullable();
+      table.json('metadata').nullable();
+      table.string('session_id', 64).nullable();
+      table.string('agent_id', 64).nullable();
+      table.string('memory_type', 32).notNullable().defaultTo('general');
+      table.decimal('importance', 3, 2).notNullable().defaultTo(0.5);
+      table.string('embedding_provider', 16).notNullable().defaultTo('tfidf');
+      table.integer('access_count').notNullable().defaultTo(0);
+      table.timestamp('last_accessed_at').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('session_id');
+      table.index('agent_id');
+      table.index('memory_type');
+      table.index('importance');
+      table.index('created_at');
+      table.index('last_accessed_at');
+    });
+    logger.info('Created memory_entries table');
+  }
+
+  const hasMemoryEntities = await db.schema.hasTable('memory_entities');
+  if (!hasMemoryEntities) {
+    await db.schema.createTable('memory_entities', (table) => {
+      table.string('id', 64).primary();
+      table.string('name', 255).notNullable();
+      table.string('entity_type', 32).notNullable();
+      table.string('memory_id', 64).notNullable().references('id').inTable('memory_entries').onDelete('CASCADE');
+      table.json('attributes').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.index('entity_type');
+    });
+    await db.raw('CREATE INDEX `memory_entities_name_index` ON `memory_entities` (`name`(191))');
+    logger.info('Created memory_entities table');
   }
 }
 
