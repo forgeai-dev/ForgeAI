@@ -20,6 +20,24 @@ const MAX_RESULT_CHARS = 1500;
 const logger = createLogger('Agent:Runtime');
 
 /**
+ * Strip leaked function-call markup that some providers (e.g. DeepSeek DSML)
+ * may emit as plain text when tools are unavailable.
+ */
+function sanitizeResponseContent(text: string | undefined): string | undefined {
+  if (!text) return text;
+  // DeepSeek DSML format: <｜DSML｜function_calls> ... </｜DSML｜function_calls>
+  // Also catch partial/malformed variants
+  let cleaned = text.replace(/<｜DSML｜[^>]*>[\s\S]*?<\/｜DSML｜[^>]*>/g, '').trim();
+  // Fallback: strip any remaining DSML tags
+  cleaned = cleaned.replace(/<\/?｜DSML｜[^>]*>/g, '').trim();
+  // If everything was markup and nothing meaningful remains, return a fallback
+  if (!cleaned) {
+    return '⚠️ A resposta foi truncada porque o limite de iterações foi atingido. Verifique os passos acima para ver o progresso.';
+  }
+  return cleaned;
+}
+
+/**
  * Compact tool results into TOON-like format to save tokens.
  * Reduces verbose JSON into minimal key=value notation.
  */
@@ -871,7 +889,9 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
           logger.warn(`Iteration cap reached (${DEFAULT_MAX_ITERATIONS})`, { sessionId: params.sessionId });
           toolMessages.push({
             role: 'system',
-            content: `ITERATION LIMIT REACHED (${DEFAULT_MAX_ITERATIONS}). You MUST provide your final answer NOW. Summarize what was accomplished and any remaining issues.`,
+            content: `ITERATION LIMIT REACHED (${DEFAULT_MAX_ITERATIONS}). You MUST provide your final answer NOW in plain text.
+Do NOT output any tool calls, function calls, XML tags, DSML markup, or code execution blocks.
+Summarize what was accomplished, provide access URLs/links if applicable, and list any remaining issues.`,
           });
           // One last LLM call to get a final summary, then break
           const finalResponse = await this.router.chat({
@@ -1193,10 +1213,13 @@ If everything is correct, present your final answer now. If you find issues, mak
       // Mark progress as done
       this.updateProgress(params.sessionId, { status: 'done', currentTool: undefined, currentArgs: undefined });
 
+      // Sanitize leaked function-call markup before emitting/storing
+      const cleanContent = sanitizeResponseContent(response!.content) ?? response!.content;
+
       // Emit done event with final result
       this.emitProgress(params.sessionId, {
         type: 'done', sessionId: params.sessionId, agentId: this.config.id,
-        result: { content: response!.content, model: response!.model, duration: Date.now() - startTime },
+        result: { content: cleanContent, model: response!.model, duration: Date.now() - startTime },
         timestamp: Date.now(),
       });
 
@@ -1214,7 +1237,7 @@ If everything is correct, present your final answer now. If you find issues, mak
       // Step 6: Store assistant response in history
       history.push({
         role: 'assistant',
-        content: response!.content,
+        content: cleanContent,
         timestamp: new Date(),
         tokenCount: totalUsage.completionTokens,
         model: response!.model,
@@ -1225,10 +1248,10 @@ If everything is correct, present your final answer now. If you find issues, mak
       this.updateSessionMeta(params.sessionId, totalUsage.totalTokens);
 
       // Auto-store cross-session memory
-      this.storeSessionMemory(params.sessionId, params.content, response!.content);
+      this.storeSessionMemory(params.sessionId, params.content, cleanContent);
 
       // Adaptive learning: extract patterns from this interaction
-      this.learnFromInteraction(params.sessionId, params.content, response!.content, steps, duration);
+      this.learnFromInteraction(params.sessionId, params.content, cleanContent, steps, duration);
 
       // Prompt optimizer: record structured outcome for auto-optimization
       if (this.promptOptimizer) {
@@ -1286,7 +1309,7 @@ If everything is correct, present your final answer now. If you find issues, mak
 
       return {
         id: response.id,
-        content: response.content,
+        content: cleanContent,
         thinking: response.thinking,
         model: response.model,
         provider: response.provider,
