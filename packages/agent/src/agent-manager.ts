@@ -610,8 +610,8 @@ export class AgentManager {
     }
 
     // Track result for delegation history
-    let delegateResult: string = '';
-    let delegateStatus: 'completed' | 'failed' = 'completed';
+    let delegateResult = '';
+    let delegateStatus!: 'completed' | 'failed';
     let delegateSteps = 0;
     let delegateTokens = 0;
     let delegateError: string | undefined;

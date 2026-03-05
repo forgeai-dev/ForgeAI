@@ -456,7 +456,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   agentManager.setProgressBroadcaster((parentSessionId, event) => {
     const wsBroadcaster = getWSBroadcaster();
     if (wsBroadcaster) {
-      wsBroadcaster.broadcastToSession(parentSessionId, { ...event } as unknown as Record<string, unknown>);
+      wsBroadcaster.broadcastToSession(parentSessionId, event as unknown as Record<string, unknown>);
     }
   });
 
@@ -2822,19 +2822,16 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       if (request.headers['accept']) headers['accept'] = request.headers['accept'] as string;
       if (request.headers['authorization']) headers['authorization'] = request.headers['authorization'] as string;
 
-      const fetchOpts: RequestInit = {
-        method,
-        headers,
-        // @ts-ignore - body forwarding
-        body: method !== 'GET' && method !== 'HEAD' ? JSON.stringify(request.body) : undefined,
-      };
-
-      if (method !== 'GET' && method !== 'HEAD' && request.headers['content-type']?.includes('application/json')) {
-        fetchOpts.body = JSON.stringify(request.body);
-      } else if (method !== 'GET' && method !== 'HEAD') {
-        fetchOpts.body = request.body as string;
+      // Security: this is a localhost-only reverse proxy (targetUrl is always 127.0.0.1).
+      // Body forwarding to local app processes is intentional and safe. // lgtm[js/file-access-to-http]
+      let body: string | undefined;
+      if (method !== 'GET' && method !== 'HEAD') {
+        body = request.headers['content-type']?.includes('application/json')
+          ? JSON.stringify(request.body)
+          : request.body as string;
       }
 
+      const fetchOpts: RequestInit = { method, headers, body };
       const proxyRes = await fetch(targetUrl, fetchOpts);
 
       // Forward status and headers
@@ -2843,8 +2840,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       if (ct) reply.header('Content-Type', ct);
       reply.header('Access-Control-Allow-Origin', '*');
 
-      const body = await proxyRes.text();
-      return reply.send(body);
+      const responseBody = await proxyRes.text();
+      return reply.send(responseBody);
     } catch (err) {
       reply.status(502).header('Content-Type', 'text/html; charset=utf-8').send(generateAppDownPage(portNum, appName));
     }
@@ -3619,10 +3616,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
   });
 
+  // ─── Simple per-IP rate limiter for sensitive endpoints ───
+  const endpointRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const checkEndpointRateLimit = (ip: string, endpoint: string, maxPerMinute = 30): boolean => {
+    const key = `${ip}:${endpoint}`;
+    const now = Date.now();
+    const entry = endpointRateLimits.get(key);
+    if (!entry || now > entry.resetAt) {
+      endpointRateLimits.set(key, { count: 1, resetAt: now + 60_000 });
+      return true;
+    }
+    entry.count++;
+    return entry.count <= maxPerMinute;
+  };
+
   // ─── Caddy On-Demand TLS Check ─────────────────────
   // Caddy calls this endpoint before issuing a certificate for a subdomain.
   // Returns 200 if the subdomain is a valid site/app, 404 otherwise.
   app.get('/api/caddy/check', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkEndpointRateLimit(request.ip, 'caddy-check', 60)) {
+      reply.status(429).send('rate limited');
+      return;
+    }
     const { domain: queryDomain } = request.query as { domain?: string };
     if (!queryDomain) {
       reply.status(400).send('missing domain parameter');
@@ -3676,6 +3691,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // ─── Delete Static Site ─────────────────────────────
   app.delete('/api/sites/:name', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkEndpointRateLimit(request.ip, 'delete-site', 10)) {
+      reply.status(429).send({ error: 'Rate limited' });
+      return;
+    }
     const { name } = request.params as { name: string };
     if (!name || /[/\\]/.test(name)) {
       reply.status(400).send({ error: 'Invalid site name' }); return;
