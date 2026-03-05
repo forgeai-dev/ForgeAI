@@ -393,11 +393,20 @@ export class AgentManager {
 
     if (updates.model || updates.provider) {
       runtime.updateConfig({ model: updates.model, provider: updates.provider });
+      if (updates.model) def.model = updates.model;
+      if (updates.provider) def.provider = updates.provider as any;
     }
     if (updates.name) def.name = updates.name;
     if (updates.persona) def.persona = updates.persona;
 
     return true;
+  }
+
+  /**
+   * Get all agent definitions (for persistence).
+   */
+  getAgentDefs(): AgentDefinition[] {
+    return Array.from(this.agentDefs.values());
   }
 
   /**

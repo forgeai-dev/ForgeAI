@@ -24,6 +24,8 @@ import { loadWorkspacePrompts, getWorkspacePromptFiles } from '@forgeai/agent';
 import { createOTelManager, type OTelManager } from '../telemetry/otel-manager.js';
 import { createArtifactManager, type ArtifactManager } from '../artifact/artifact-manager.js';
 import { createSessionRecorder, type SessionRecorder } from '../recording/session-recorder.js';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { resolve as pathResolve } from 'node:path';
 
 const logger = createLogger('Core:ChatRoutes');
 
@@ -71,6 +73,44 @@ let appManager: AppManager | null = null;
 
 // Maps userId → last known channel delivery target for proactive messages (cron, reminders)
 const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
+
+// ─── Agent Config Persistence ──────────────────────────
+// Saves/loads agent definitions to .forgeai/agents.json so model/provider survives restarts
+
+function getAgentConfigPath(): string {
+  const root = resolveForgeAIRoot();
+  return pathResolve(root, 'agents.json');
+}
+
+function saveAgentConfigs(): void {
+  if (!agentManager) return;
+  try {
+    const defs = agentManager.getAgentDefs();
+    const configPath = getAgentConfigPath();
+    const dir = pathResolve(configPath, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(configPath, JSON.stringify(defs, null, 2), 'utf-8');
+    logger.info('Agent configs saved', { path: configPath, count: defs.length });
+  } catch (err) {
+    logger.warn('Failed to save agent configs', { error: (err as Error).message });
+  }
+}
+
+function loadAgentConfigs(): Array<{ id: string; name: string; model?: string; provider?: string; persona?: string; temperature?: number; maxTokens?: number; default?: boolean; tools?: { allow?: string[]; deny?: string[] }; sandboxMode?: string; workspace?: string }> | null {
+  try {
+    const configPath = getAgentConfigPath();
+    if (!existsSync(configPath)) return null;
+    const raw = readFileSync(configPath, 'utf-8');
+    const defs = JSON.parse(raw);
+    if (Array.isArray(defs) && defs.length > 0) {
+      logger.info('Agent configs loaded from disk', { path: configPath, count: defs.length });
+      return defs;
+    }
+  } catch (err) {
+    logger.warn('Failed to load agent configs', { error: (err as Error).message });
+  }
+  return null;
+}
 
 // ─── App Registry: maps app name → port for subdomain routing ───
 // Allows agent-created apps to be accessed via subdomain (e.g., painel.domain.com → port 3456)
@@ -299,8 +339,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // ─── Load onboard-provider.json (from forge onboard wizard) ────────────────
   try {
-    const { resolve: pathResolve } = await import('node:path');
-    const { readFileSync, unlinkSync, existsSync } = await import('node:fs');
+    const { unlinkSync } = await import('node:fs');
     const onboardPath = pathResolve(resolveForgeAIRoot(), 'onboard-provider.json');
     if (existsSync(onboardPath)) {
       const raw = JSON.parse(readFileSync(onboardPath, 'utf-8'));
@@ -359,7 +398,13 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   ];
 
   // Helper: sync agentRuntime config to the best available provider in the router
+  // Only auto-syncs if user hasn't saved a config — respects user choice
   const syncAgentToRouter = () => {
+    const savedConfigs = loadAgentConfigs();
+    if (savedConfigs && savedConfigs.length > 0) {
+      // User has a saved config — don't override their choice
+      return;
+    }
     const runtime = agentManager?.getDefaultAgent() ?? agentRuntime;
     if (!runtime) return;
     const currentProviders = router.getProviders();
@@ -382,6 +427,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     }
   }
 
+  // Load saved agent configs (persisted from previous sessions)
+  const savedAgentConfigs = loadAgentConfigs();
+
   const agentConfig: AgentConfig = {
     id: 'default',
     name: 'ForgeAI Assistant',
@@ -397,15 +445,30 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // Initialize AgentManager (multi-agent support)
   agentManager = createAgentManager(router);
-  agentManager.addAgent({
-    id: 'main',
-    name: 'ForgeAI Assistant',
-    model: defaultModel,
-    provider: defaultProvider as any,
-    temperature: 0.7,
-    maxTokens: 16384,
-    default: true,
-  });
+
+  if (savedAgentConfigs && savedAgentConfigs.length > 0) {
+    // Restore all agents from saved config (user's choice persists across restarts)
+    for (const def of savedAgentConfigs) {
+      agentManager.addAgent(def as any);
+    }
+    const defaultDef = savedAgentConfigs.find(d => d.default) ?? savedAgentConfigs[0];
+    logger.info('Agents restored from saved config', {
+      count: savedAgentConfigs.length,
+      defaultModel: defaultDef?.model,
+      defaultProvider: defaultDef?.provider,
+    });
+  } else {
+    // No saved config — use auto-detected provider
+    agentManager.addAgent({
+      id: 'main',
+      name: 'ForgeAI Assistant',
+      model: defaultModel,
+      provider: defaultProvider as any,
+      temperature: 0.7,
+      maxTokens: 16384,
+      default: true,
+    });
+  }
   // Keep agentRuntime as convenience ref to default agent
   agentRuntime = agentManager.getDefaultAgent()!;
 
@@ -2961,6 +3024,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       temperature: body.temperature,
       tools: body.tools,
     });
+    saveAgentConfigs();
     return { success: true, agent: agentManager.listAgents().find((a: { id: string }) => a.id === body.id) };
   });
 
@@ -2973,6 +3037,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       reply.status(400).send({ error: `Cannot remove agent '${id}' (default or not found)` });
       return;
     }
+    saveAgentConfigs();
     return { success: true };
   });
 
@@ -2986,6 +3051,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       reply.status(404).send({ error: `Agent '${id}' not found` });
       return;
     }
+    saveAgentConfigs();
     return { success: true, agent: agentManager.listAgents().find((a: { id: string }) => a.id === id) };
   });
 
