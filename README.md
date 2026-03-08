@@ -102,7 +102,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 19
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
 
 ### 🤖 Autonomous Agent
-The agentic loop runs with **no iteration limit** — the agent works until the task is complete (only stuck-loop detection serves as safety). It browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, **creates Forge Teams of specialist agents**, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses, fixes, and **installs missing dependencies** (languages, libraries, tools) with full root access. **Adaptive Prompt Optimizer**: learns from past task outcomes to improve future performance. **Intent Classifier**: zero-cost heuristic classification (greeting/simple/complex/ambiguous/followup) — skips tools for simple messages, saves tokens, asks for clarification on ambiguous inputs.
+The agentic loop runs with a **200-iteration safety cap** (effectively unlimited — complex tasks typically use 20-30 iterations). The agent works until the task is complete, with stuck-loop detection and a high safety cap as protection against runaway token consumption. It browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, **creates Forge Teams of specialist agents**, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses, fixes, and **installs missing dependencies** (languages, libraries, tools) with full root access. **Adaptive Prompt Optimizer**: learns from past task outcomes to improve future performance. **Intent Classifier**: zero-cost heuristic classification (greeting/simple/complex/ambiguous/followup) — skips tools for simple messages, saves tokens, asks for clarification on ambiguous inputs.
 
 </td>
 <td width="50%">
@@ -475,9 +475,9 @@ Accessible at: https://yourdomain.com/sites/startup-landing/
 ## 🧠 Advanced Capabilities
 
 <details>
-<summary><b>Agentic Loop (Unlimited Iterations)</b></summary>
+<summary><b>Agentic Loop (200-Iteration Safety Cap)</b></summary>
 
-The agent autonomously iterates: think → decide tool → execute → process result → repeat. **No iteration limit** — the agent works until the task is complete. Only stuck-loop detection (duplicate tool call sequences) serves as a safety net. Each iteration is tracked with real-time progress broadcast via WebSocket to the Dashboard and messaging channels. **Reflection phase**: after 3+ iterations with tool calls, the agent verifies its own work quality before presenting the final answer.
+The agent autonomously iterates: think → decide tool → execute → process result → repeat. A **200-iteration safety cap** prevents runaway token consumption (complex tasks typically use 20-30 iterations, so 200 is effectively unlimited for any real task). **Stuck-loop detection** catches consecutive duplicate tool calls and forces the agent to move on. Each iteration is tracked with real-time progress broadcast via WebSocket to the Dashboard and messaging channels. **Reflection phase**: after 3+ iterations with tool calls, the agent verifies its own work quality before presenting the final answer. If the cap is reached, the agent produces a final summary of what was accomplished.
 
 </details>
 
@@ -1046,7 +1046,7 @@ pnpm forge status      # Quick status check
 All core features are implemented and tested:
 
 - **Security** — 9 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, Email OTP (external access), setup wizard, audit
-- **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (unlimited iterations), thinking levels, failover + circuit breaker, reflection phase
+- **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (200-iteration safety cap), thinking levels, failover + circuit breaker, reflection phase
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol (IoT)
 - **Tools** — 19 built-in + MCP Client + Puppeteer + Shell + Sandbox
 - **Dashboard** — 19 pages, WebSocket real-time, provider balance tracking
