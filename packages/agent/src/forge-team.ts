@@ -117,7 +117,10 @@ export class ForgeTeamEngine {
     if (params.tasks.length > MAX_WORKERS_PER_TEAM) {
       return this.failResult(teamId, params.name, `Max ${MAX_WORKERS_PER_TEAM} workers per team`);
     }
-    if (activeTeams.size >= MAX_CONCURRENT_TEAMS) {
+    const runningCount = Array.from(activeTeams.values()).filter(
+      t => t.status === 'running' || t.status === 'planning',
+    ).length;
+    if (runningCount >= MAX_CONCURRENT_TEAMS) {
       return this.failResult(teamId, params.name, `Max ${MAX_CONCURRENT_TEAMS} concurrent teams. Wait for current teams to finish.`);
     }
 

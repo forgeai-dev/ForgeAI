@@ -32,7 +32,7 @@ export type SuggestedAction =
 // ─── Pattern definitions ─────────────────────────────────
 
 const GREETING_PATTERNS = [
-  /^(oi|olá|ola|hey|hi|hello|e aí|eai|fala|bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|yo|opa|salve)\b/i,
+  /^(oi|olá|ola|hey|hi|hello|e aí|eai|fala|bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|yo|opa|salve)(?:\b|$)/i,
   /^(como vai|how are you|tudo bem|tudo certo|beleza|blz|suave)\??$/i,
 ];
 
@@ -43,8 +43,8 @@ const STATUS_CHECK_PATTERNS = [
 ];
 
 const YES_NO_PATTERNS = [
-  /^(sim|s|yes|y|yeah|yep|yup|claro|com certeza|pode|ok|okay|blz|beleza|tranquilo|bora|vamos|dale|go|sure|of course)\b\.?$/i,
-  /^(não|nao|n|no|nope|nah|negativo|cancel|cancelar|para|stop)\b\.?$/i,
+  /^(sim|s|yes|y|yeah|yep|yup|claro|com certeza|pode|ok|okay|blz|beleza|tranquilo|bora|vamos|dale|go|sure|of course)(?:\b|$)\.?$/i,
+  /^(não|nao|n|no|nope|nah|negativo|cancel|cancelar|para|stop)(?:\b|$)\.?$/i,
 ];
 
 const THANKS_PATTERNS = [

@@ -5,7 +5,7 @@ export const ChatCommandsPlugin: ForgePlugin = {
     id: 'forgeai-chat-commands',
     name: 'Chat Commands',
     version: '0.1.0',
-    description: 'Handles slash commands like /status, /new, /help, /tools, /plugins, /workflows in any channel.',
+    description: 'Handles slash commands like /status, /new, /help, /tools, /plugins, /workflows, /compact, /usage, /think in any channel.',
     author: 'ForgeAI',
     tags: ['builtin', 'utility', 'commands'],
     permissions: ['hooks.message', 'storage.read', 'storage.write'],
@@ -62,6 +62,9 @@ export const ChatCommandsPlugin: ForgePlugin = {
           '',
           '`/status` — Show system status',
           '`/new` or `/reset` — Reset conversation',
+          '`/compact` — Compact session context (free up tokens)',
+          '`/usage off|tokens|full` — Per-response usage footer',
+          '`/think off|low|medium|high` — Extended thinking level',
           '`/help` — Show this help',
           '`/tools` — List available tools',
           '`/plugins` — List active plugins',
@@ -72,6 +75,42 @@ export const ChatCommandsPlugin: ForgePlugin = {
         ].join('\n');
 
         return { handled: true, response };
+      }
+
+      case 'compact': {
+        // Signal the gateway to compact the current session
+        // The actual compaction is handled by the gateway via the metadata flag
+        return {
+          handled: true,
+          response: '🗜️ Session context compacted. Older messages have been summarized to free up token space.',
+          metadata: { action: 'compact', sessionId: message.sessionId },
+        };
+      }
+
+      case 'usage': {
+        const args = input.slice(1).split(/\s+/).slice(1);
+        const mode = (args[0] || '').toLowerCase();
+        if (!['off', 'tokens', 'full'].includes(mode)) {
+          return { handled: true, response: '❓ Usage: `/usage off|tokens|full`' };
+        }
+        return {
+          handled: true,
+          response: `📊 Usage display set to **${mode}**.`,
+          metadata: { action: 'set_usage_mode', mode },
+        };
+      }
+
+      case 'think': {
+        const args = input.slice(1).split(/\s+/).slice(1);
+        const level = (args[0] || '').toLowerCase();
+        if (!['off', 'low', 'medium', 'high'].includes(level)) {
+          return { handled: true, response: '❓ Usage: `/think off|low|medium|high`' };
+        }
+        return {
+          handled: true,
+          response: `🧠 Thinking level set to **${level}**.`,
+          metadata: { action: 'set_thinking', level },
+        };
       }
 
       case 'tools': {

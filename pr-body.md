@@ -1,39 +1,47 @@
 ## Description
 
-Fix 429 Too Many Requests cascade on VPS + DeepSeek Reasoner compatibility.
+Skill Registry, enhanced `forge doctor` CLI, 6 memory leak fixes, CI pipeline expansion (9 test suites, 443 tests), Chat Commands plugin improvements, and README refresh with animated badges.
 
 ## Type of Change
 
 - [x] Bug fix
-- [ ] New feature
+- [x] New feature
 - [ ] Refactor (no functional changes)
-- [ ] Documentation
-- [ ] Tests
-- [ ] Security
+- [x] Documentation
+- [x] Tests
+- [x] Security
 
 ## Changes Made
 
-- **Rate limiter exempt list** (`packages/core/src/gateway/server.ts`):
-  - Added `/api/agents`, `/api/delegations`, `/api/chat/active`, `/api/settings/language`, `/api/providers/balances` to exact exempt set
-  - Added `/api/chat/sessions/`, `/api/settings/` to prefix exempt list
-  - Prevents 429 cascade when WebSocket disconnects and dashboard polls aggressively
+### Bugfixes (6)
+- **`runtime.ts` `clearSession`/`clearAllHistory`** — Memory leak: wasn't cleaning `sessionSummarized`, `progressListeners`, `abortedSessions`, `abortControllers`
+- **`agent-manager.ts`** — `setInterval` cache cleanup missing `.unref()` (blocked clean process exit)
+- **`chat-routes.ts`** — `sessionPlans` global Map never cleaned on session delete
+- **`chat-routes.ts` + `chat-commands.ts`** — `sessionSettings` global Map never cleaned on session delete
+- **`runtime.ts` `processMessageStream`** — Missing `sanitizeResponseContent()` (DeepSeek DSML markup leak)
+- **`forge-team.test.ts`** — Flaky timing assertion (`toBeGreaterThan(0)` → `toBeGreaterThanOrEqual(0)`)
 
-- **DeepSeek Reasoner compatibility** (`packages/agent/src/providers/openai-compatible.ts`):
-  - Detect `reasoner` models (e.g. `deepseek-reasoner`)
-  - Skip `temperature` param (API rejects it for reasoner models)
-  - Skip `tools` param (reasoner models don't support function calling)
-  - Applied to both `chat()` and `chatStream()` methods
+### New Features
+- **Skill Registry** — Dynamic skill management (install/activate/deactivate/uninstall). 3 handler types, file-persistent store, API endpoints, 67 unit tests
+- **Enhanced `forge doctor`** — 5 sections, ~25 checks (Runtime, Config, LLM Providers, Services, Workspace)
+- **Chat Commands Plugin** — `/compact`, `/usage`, `/think` via plugin path + `metadata` field on `MessageHookResult`
+
+### CI/CD
+- **ci.yml** — Unit test step expanded from 3 to 9 test files (443 total tests)
+
+### Documentation
+- **README.md** — Animated typing header, `for-the-badge` style badges, colorful feature count table, "What's New" section, updated tech stack and roadmap
 
 ## How to Test
 
-1. `pnpm -r build`
-2. Set `deepseek-reasoner` as main model → send message via Telegram → should get a response (no API error)
-3. Open dashboard on VPS → no 429 errors in console
-4. Kill WebSocket connection → dashboard should still work via HTTP polling without hitting rate limit
+1. `pnpm run build` → all packages compile clean
+2. `npx vitest run` → 443/443 tests pass (api.test.ts needs running gateway)
+3. `pnpm forge doctor` → shows 5 diagnostic sections
 
 ## Checklist
 
-- [x] Code builds without errors (`pnpm -r build`)
+- [x] Code builds without errors (`pnpm run build`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
 - [x] Backward compatible
+- [x] All 443 tests pass

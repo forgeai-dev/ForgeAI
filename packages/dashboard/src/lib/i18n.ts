@@ -506,8 +506,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.general': 'Général', 'settings.language': 'Langue', 'settings.languageDesc': 'Langue de l\'interface',
     'settings.llmProviders': 'Fournisseurs LLM', 'settings.security': 'Sécurité',
     'settings.voiceEngine': 'Moteur Vocal', 'settings.database': 'Base de Données',
-    'chat.newChat': 'Nouveau Chat', 'chat.askAnything': 'Demandez quelque chose...',
-    'common.save': 'Enregistrer', 'common.cancel': 'Annuler', 'common.delete': 'Supprimer',
   },
 
   de: {

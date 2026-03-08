@@ -64,6 +64,7 @@ export { SmartHomeTool, setHomeAssistantRef, getHomeAssistantRef } from './tools
 export { SpotifyIntegration, createSpotifyIntegration } from './integrations/spotify-integration.js';
 export type { SpotifyConfig, SpotifyTokens, SpotifyDevice, SpotifyTrack, SpotifyPlayback, SpotifyPlaylist, SpotifySearchResult } from './integrations/spotify-integration.js';
 export { SpotifyTool, setSpotifyRef, getSpotifyRef } from './tools/spotify.js';
+export { SkillListTool, SkillInstallTool, SkillActivateTool, SkillDeactivateTool, SkillCreateTool, setSkillRegistryRef } from './tools/skill-tools.js';
 
 import { ToolRegistry } from './registry.js';
 import { WebBrowserTool } from './tools/web-browser.js';
@@ -84,6 +85,7 @@ import { ProjectDeleteTool } from './tools/project-delete.js';
 import { AppRegisterTool } from './tools/app-register.js';
 import { SmartHomeTool } from './tools/smart-home.js';
 import { SpotifyTool } from './tools/spotify.js';
+import { SkillListTool, SkillInstallTool, SkillActivateTool, SkillDeactivateTool, SkillCreateTool } from './tools/skill-tools.js';
 import type { AuditLogger } from '@forgeai/security';
 
 export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegistry {
@@ -110,6 +112,11 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new ForgeTeamTool());
   registry.register(new ProjectDeleteTool());
   registry.register(new AppRegisterTool());
+  registry.register(new SkillListTool());
+  registry.register(new SkillInstallTool());
+  registry.register(new SkillActivateTool());
+  registry.register(new SkillDeactivateTool());
+  registry.register(new SkillCreateTool());
 
   return registry;
 }

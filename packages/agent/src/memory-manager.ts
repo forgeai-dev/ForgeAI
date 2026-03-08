@@ -174,6 +174,7 @@ export class MemoryManager {
   private config: MemoryConfig;
   private persistence: MemoryPersistence | null = null;
   private vocabIndex: Map<string, number> = new Map();
+  private vocabReverse: Map<number, string> = new Map();
   private vocabCounter = 0;
   private idfCache: Map<string, number> = new Map();
   private idfDirty = false;
@@ -600,6 +601,7 @@ export class MemoryManager {
       if (idx === undefined) {
         idx = this.vocabCounter++;
         this.vocabIndex.set(token, idx);
+        this.vocabReverse.set(idx, token);
         this.idfDirty = true;
       }
       tf.set(idx, (tf.get(idx) ?? 0) + 1);
@@ -626,10 +628,7 @@ export class MemoryManager {
   }
 
   private vocabReverseLookup(idx: number): string | undefined {
-    for (const [token, i] of this.vocabIndex) {
-      if (i === idx) return token;
-    }
-    return undefined;
+    return this.vocabReverse.get(idx);
   }
 
   private rebuildIDF(): void {
@@ -655,7 +654,9 @@ export class MemoryManager {
     const tokens = this.tokenize(content);
     for (const token of tokens) {
       if (!this.vocabIndex.has(token)) {
-        this.vocabIndex.set(token, this.vocabCounter++);
+        const idx = this.vocabCounter++;
+        this.vocabIndex.set(token, idx);
+        this.vocabReverse.set(idx, token);
       }
     }
   }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Plus, Trash2, Pencil, Users, Star, Cpu, X, GitBranch, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
-import { api, type AgentInfo, type DelegationRecord, type TeamInfo, type ProviderInfo } from '@/lib/api';
+import { Bot, Plus, Trash2, Pencil, Users, Star, Cpu, X, Clock, Zap, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { api, type AgentInfo, type DelegationRecord, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface NewAgentForm {
@@ -15,7 +15,6 @@ const EMPTY_FORM: NewAgentForm = { id: '', name: '', persona: '', model: '', pro
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [delegations, setDelegations] = useState<DelegationRecord[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<NewAgentForm>(EMPTY_FORM);
@@ -26,7 +25,7 @@ export function AgentsPage() {
   const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
 
   const refresh = useCallback(() => {
-    api.getAgents().then(d => { setAgents(d.agents); setTeams(d.teams ?? []); }).catch(() => {});
+    api.getAgents().then(d => { setAgents(d.agents); }).catch(() => {});
     api.getDelegations().then(d => setDelegations(d.delegations ?? [])).catch(() => {});
   }, []);
 
@@ -377,60 +376,6 @@ export function AgentsPage() {
         )}
       </div>
 
-      {/* ─── Forge Teams ─────────────────────────── */}
-      {teams.length > 0 && (
-        <div className="mt-10">
-          <div className="flex items-center gap-2 mb-4">
-            <GitBranch className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-lg font-bold text-white">Forge Teams</h2>
-            <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-medium">
-              {teams.length}
-            </span>
-          </div>
-          <div className="grid gap-3">
-            {teams.map(team => (
-              <div key={team.id} className="p-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-white font-semibold text-sm">{team.name}</h3>
-                    <span className={cn(
-                      'px-2 py-0.5 rounded-full text-[10px] font-medium',
-                      team.status === 'running' ? 'bg-blue-500/15 text-blue-400' :
-                      team.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' :
-                      team.status === 'failed' ? 'bg-red-500/15 text-red-400' :
-                      'bg-zinc-500/15 text-zinc-400'
-                    )}>
-                      {team.status === 'running' && <Loader2 className="w-3 h-3 inline mr-1 animate-spin" />}
-                      {team.status}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-zinc-500">
-                    {team.completedCount}/{team.taskCount} tasks
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {team.workers.map(w => (
-                    <div key={w.taskId} className={cn(
-                      'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs',
-                      w.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                      w.status === 'running' ? 'bg-blue-500/10 text-blue-400' :
-                      w.status === 'failed' ? 'bg-red-500/10 text-red-400' :
-                      'bg-zinc-700/40 text-zinc-400'
-                    )}>
-                      {w.status === 'completed' ? <CheckCircle2 className="w-3 h-3" /> :
-                       w.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> :
-                       w.status === 'failed' ? <XCircle className="w-3 h-3" /> :
-                       <Clock className="w-3 h-3" />}
-                      {w.role}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ─── Sub-Agentes & Delegações ────────────── */}
       {delegations.length > 0 && (
         <div className="mt-10">
@@ -529,3 +474,5 @@ export function AgentsPage() {
     </div>
   );
 }
+
+

@@ -70,6 +70,7 @@ export interface MessageHookResult {
   handled: boolean;
   response?: string;
   modified?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ToolCallHookResult {

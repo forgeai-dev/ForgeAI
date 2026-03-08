@@ -4,18 +4,18 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef, setProjectDeleteRefs, setAppRegisterRefs } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, clearSessionPlan, setDelegateManagerRef, setForgeTeamRef, setProjectDeleteRefs, setAppRegisterRefs, setSkillRegistryRef } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
-import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams, createAgentWorkflowEngine, MySQLWorkflowStore } from '@forgeai/agent';
+import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams, createAgentWorkflowEngine, MySQLWorkflowStore, createSkillRegistry, FileSkillStore } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
 import { createAppManager, type AppManager, generateAppDownPage } from './app-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
-import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef } from './chat-commands.js';
+import { handleChatCommand, formatUsageFooter, setAutopilotRef, setPairingRef, clearSessionSettings } from './chat-commands.js';
 import { createAutopilotEngine, type AutopilotEngine } from '../autopilot/autopilot-engine.js';
 import { createPairingManager, type PairingManager } from '../pairing/pairing-manager.js';
 import { ChatHistoryStore, createChatHistoryStore, type StoredMessage } from '../chat-history-store.js';
@@ -514,6 +514,16 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // Wire Forge Teams engine with AgentManager for coordinated team execution
   const forgeTeamEngine = createForgeTeamEngine(agentManager);
   setForgeTeamRef(forgeTeamEngine, { getActiveTeams });
+
+  // Wire Skill Registry — dynamic skill management with file persistence
+  const skillStorePath = pathResolve(resolveForgeAIRoot(), 'skills', 'skills.json');
+  const skillStore = new FileSkillStore(skillStorePath);
+  const skillRegistry = createSkillRegistry(skillStore);
+  await skillRegistry.initialize();
+  setSkillRegistryRef(skillRegistry);
+  // Attach skill registry to ALL agents (current + future via addAgent)
+  agentManager.setSkillRegistry(skillRegistry);
+  logger.info('Skill registry initialized', skillRegistry.getStats());
 
   // Phase 3: Wire sub-agent progress broadcaster → forward delegate events to parent session via WS
   agentManager.setProgressBroadcaster((parentSessionId, event) => {
@@ -2065,6 +2075,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     if (chatHistoryStore) {
       await chatHistoryStore.deleteSession(sessionId);
     }
+    clearSessionPlan(sessionId);
+    clearSessionSettings(sessionId);
 
     return { success: true, sessionId };
   });
@@ -2113,6 +2125,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     if (chatHistoryStore) {
       await chatHistoryStore.deleteSession(sessionId);
     }
+    clearSessionPlan(sessionId);
+    clearSessionSettings(sessionId);
     return { success: true, sessionId };
   });
 

@@ -596,7 +596,10 @@ export function ChatPage() {
       } else if (data.type === 'agent.step' && data.step) {
         const eventSid = data.sessionId;
         if (eventSid && currentSid && eventSid !== currentSid) return;
-        setLiveProgress(prev => prev ? { ...prev, steps: [...prev.steps, data.step] } : prev);
+        setLiveProgress(prev => prev
+          ? { ...prev, steps: [...prev.steps, data.step] }
+          : { sessionId: eventSid, status: 'calling_tool', iteration: 1, maxIterations: 50, steps: [data.step] }
+        );
 
       // ─── Delegate (sub-agent) streaming events (Phase 3) ───
       } else if (data.type === 'delegate.progress' && data.delegateId) {

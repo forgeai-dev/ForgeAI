@@ -38,4 +38,6 @@ export type { WakeWordEventHandler, WakeWordDetector } from './wake-word.js';
 export { classifyIntent, buildIntentContext, logIntent } from './intent-classifier.js';
 export type { IntentType, IntentResult, SuggestedAction } from './intent-classifier.js';
 export { AgentWorkflowEngine, createAgentWorkflowEngine, InMemoryWorkflowStore, MySQLWorkflowStore } from './workflow-engine.js';
+export { SkillRegistry, createSkillRegistry, InMemorySkillStore, FileSkillStore, validateManifest } from './skill-registry.js';
+export type { SkillManifest, SkillToolDef, SkillToolHandler, InstalledSkill, SkillStore, SkillCategory, SkillStatus, HandlerType, SkillConfigParam } from './skill-registry.js';
 export type { WorkflowState, WorkflowStep as AgentWorkflowStep, WorkflowStatus as AgentWorkflowStatus, StepStatus as AgentStepStatus, ExtractedContext, WorkflowPersistence } from './workflow-engine.js';

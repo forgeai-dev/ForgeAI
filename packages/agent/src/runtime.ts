@@ -8,6 +8,7 @@ import { PromptOptimizer } from './prompt-optimizer.js';
 import { loadWorkspacePrompts } from './workspace-prompts.js';
 import { classifyIntent, buildIntentContext, logIntent } from './intent-classifier.js';
 import { AgentWorkflowEngine } from './workflow-engine.js';
+import { SkillRegistry } from './skill-registry.js';
 
 export interface ToolExecutor {
   listForLLM(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
@@ -211,6 +212,7 @@ export class AgentRuntime {
   private planContextProvider: ((sessionId: string) => string | null) | null = null;
   private promptOptimizer: PromptOptimizer | null = null;
   private workflowEngine: AgentWorkflowEngine | null = null;
+  private skillRegistry: SkillRegistry | null = null;
 
   constructor(config: AgentConfig, router?: LLMRouter, usageTracker?: UsageTracker) {
     this.config = config;
@@ -251,6 +253,15 @@ export class AgentRuntime {
 
   getWorkflowEngine(): AgentWorkflowEngine | null {
     return this.workflowEngine;
+  }
+
+  setSkillRegistry(registry: SkillRegistry): void {
+    this.skillRegistry = registry;
+    logger.info('Skill registry attached to agent runtime (dynamic skills enabled)');
+  }
+
+  getSkillRegistry(): SkillRegistry | null {
+    return this.skillRegistry;
   }
 
   getPromptOptimizer(): PromptOptimizer | null {
@@ -462,19 +473,20 @@ export class AgentRuntime {
     }
 
     // Store all extracted learnings
+    if (learnings.length === 0) return;
+
+    // Pre-check learning count ONCE (not per-learning) to avoid O(n*m) search overhead
+    const allLearnings = this.memoryManager.search('learning', 100);
+    let learningCount = allLearnings.filter(r => r.entry.metadata?.type === 'learning').length;
+    if (learningCount >= AgentRuntime.MAX_LEARNINGS) {
+      this.memoryManager.consolidate();
+    }
+
     for (const learning of learnings) {
       // Check if a similar learning already exists (avoid duplicates)
       const existing = this.memoryManager.search(learning.content, 1);
       if (existing.length > 0 && existing[0].score > 0.85) {
         continue; // Skip near-duplicate
-      }
-
-      // Count current learnings to enforce limit
-      const allLearnings = this.memoryManager.search('learning', 999);
-      const learningCount = allLearnings.filter(r => r.entry.metadata?.type === 'learning').length;
-      if (learningCount >= AgentRuntime.MAX_LEARNINGS) {
-        // Consolidate before adding more
-        this.memoryManager.consolidate();
       }
 
       const memId = `learn-${learning.category}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -484,6 +496,7 @@ export class AgentRuntime {
         important: learning.importance > 0.7,
         agentId: this.config.id,
       });
+      learningCount++;
 
       logger.debug('Learning stored', { category: learning.category, content: learning.content.substring(0, 80) });
     }
@@ -651,6 +664,12 @@ Prefer most direct tool. Fewer steps = better.
 Process persistence on host: PM2/systemd. In workspace: managed app_register.
 ${W ? `PowerShell: use ";" not "&&". No "&" for bg. Use Start-Process -NoNewWindow. Use Invoke-WebRequest not curl.
 ` : ''}
+── SKILLS (Dynamic Capabilities) ──
+skill_list: view installed/active skills. skill_install: install from JSON manifest. skill_activate/skill_deactivate: toggle skills.
+skill_create: create+activate a skill on-the-fly (shortcut). Use to build custom API integrations, automation scripts, data tools.
+Handler types: "script" (shell cmd with {{param}} templates), "http" (URL+method+headers), "function" (JS code receiving params,config,fetch).
+Skills provide extra tools that appear alongside built-in tools when active. Check skill_list before creating duplicates.
+
 ── PLANNING ──
 plan_create before complex tasks (3+ steps). plan_update after each step.
 Skip planning for simple questions/single commands.
@@ -666,7 +685,11 @@ Step-by-step → check result → adapt on error → verify → clear summary.
 If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer npx over npm install -g.`;
   }
 
+  private static envCache: string | null = null;
+
   private detectEnvironment(): string {
+    if (AgentRuntime.envCache !== null) return AgentRuntime.envCache;
+
     const parts: string[] = [];
     const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
     const W = process.platform === 'win32';
@@ -732,7 +755,8 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
       parts.push('Network: localhost only');
     }
 
-    return parts.join('\n');
+    AgentRuntime.envCache = parts.join('\n');
+    return AgentRuntime.envCache;
   }
 
   async processMessage(params: {
@@ -846,6 +870,13 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
         logger.warn('Failed to load workflow state', e as Record<string, unknown>);
       }
     }
+    // Inject active skill context (dynamic skill prompt context)
+    if (this.skillRegistry && !isLocalLLM) {
+      const skillCtx = this.skillRegistry.buildSkillContext();
+      if (skillCtx) {
+        enrichedSystemPrompt += `\n\n--- ${skillCtx}`;
+      }
+    }
     // For local LLMs, limit history to last 4 messages to keep context small
     const historyToUse = isLocalLLM ? history.slice(-4) : history;
     const messages: LLMMessage[] = [
@@ -861,10 +892,10 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
       }
     }
 
-    // Step 4: Build tools list for LLM
+    // Step 4: Build tools list for LLM (base tools + active skill tools)
     // Skip tools for simple intents (greetings, status checks, thanks) — saves tokens
     const skipToolsForIntent = intent.skipTools === true && !isLocalLLM;
-    const tools: LLMToolDefinition[] | undefined = (this.toolExecutor && !skipToolsForIntent)
+    const baseToolDefs = (this.toolExecutor && !skipToolsForIntent)
       ? this.toolExecutor.listForLLM().map(t => ({
           name: t.function.name,
           description: t.function.description,
@@ -872,7 +903,21 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
           requiresApproval: false,
           riskLevel: 'low' as const,
         }))
-      : undefined;
+      : [];
+    // Merge skill tools into the tool list
+    const skillToolDefs = (this.skillRegistry && !skipToolsForIntent)
+      ? this.skillRegistry.getActiveToolsForLLM().map(t => ({
+          name: t.function.name,
+          description: t.function.description,
+          parameters: t.function.parameters,
+          requiresApproval: false,
+          riskLevel: 'low' as const,
+        }))
+      : [];
+    const tools: LLMToolDefinition[] | undefined =
+      (baseToolDefs.length > 0 || skillToolDefs.length > 0)
+        ? [...baseToolDefs, ...skillToolDefs]
+        : undefined;
 
     // Step 5: Agentic tool-calling loop
     // Create AbortController for this session so abort cancels in-flight HTTP requests
@@ -1189,7 +1234,10 @@ If everything is correct, present your final answer now. If you find issues, mak
               }
               logger.info(`▶ ${toolCall.name}(${argsSummary})`);
 
-              const toolResult = await this.toolExecutor!.execute(toolCall.name, cleanArgs, params.userId);
+              // Route to skill registry if tool belongs to an active skill, otherwise use base executor
+              const toolResult = (this.skillRegistry && this.skillRegistry.hasToolNamed(toolCall.name))
+                ? await this.skillRegistry.executeTool(toolCall.name, cleanArgs)
+                : await this.toolExecutor!.execute(toolCall.name, cleanArgs, params.userId);
 
               let resultContent = compactToolResult(toolCall.name, toolResult.data, toolResult.success, toolResult.error);
               if (isRepaired && toolResult.success) {
@@ -1440,6 +1488,9 @@ If everything is correct, present your final answer now. If you find issues, mak
     const startTime = Date.now();
     const messageId = generateId('msg');
 
+    const activeModel = this.config.model;
+    const activeProvider = this.config.provider as import('@forgeai/shared').LLMProvider;
+
     // Prompt injection check
     const guardResult = this.promptGuard.analyze(params.content);
     if (!guardResult.safe) {
@@ -1448,8 +1499,8 @@ If everything is correct, present your final answer now. If you find issues, mak
       return {
         id: messageId,
         content: blockedMsg,
-        model: this.config.model,
-        provider: this.config.provider,
+        model: activeModel,
+        provider: activeProvider,
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         blocked: true,
         blockReason: `Prompt injection detected (score: ${guardResult.score.toFixed(2)})`,
@@ -1457,21 +1508,75 @@ If everything is correct, present your final answer now. If you find issues, mak
       };
     }
 
+    // Intent classification (zero-cost heuristic)
     const history = this.getHistory(params.sessionId);
+    const intent = classifyIntent(params.content, history);
+    logIntent(params.sessionId, params.content, intent);
+
     history.push({
       role: 'user',
       content: guardResult.sanitizedInput ?? params.content,
       timestamp: new Date(),
     });
 
+    // Build enriched system prompt (same as processMessage)
+    const isLocalLLM = activeProvider === 'local';
+    let enrichedSystemPrompt = isLocalLLM
+      ? `You are ForgeAI, a personal AI assistant. You are NOT Claude, NOT GPT, NOT any other AI. If asked who you are, say "I am ForgeAI." Be concise and helpful. Match user language. Only describe capabilities you actually have.`
+      : this.systemPrompt;
+    if (this.memoryManager && !isLocalLLM) {
+      const memoryContext = this.buildMemoryContext(params.content, params.sessionId);
+      if (memoryContext) {
+        enrichedSystemPrompt += `\n\n--- Cross-Session Memory ---\n${memoryContext}`;
+      }
+      const learningContext = this.buildLearningContext(params.content);
+      if (learningContext) {
+        enrichedSystemPrompt += `\n\n--- ${learningContext}`;
+      }
+    }
+    if (this.promptOptimizer && !isLocalLLM) {
+      const optimizedCtx = this.promptOptimizer.buildOptimizedContext(params.content);
+      if (optimizedCtx) {
+        enrichedSystemPrompt += `\n\n--- ${optimizedCtx}`;
+      }
+    }
+    if (this.contextProvider && !isLocalLLM) {
+      const dynamicCtx = this.contextProvider();
+      if (dynamicCtx) {
+        enrichedSystemPrompt += `\n\n--- Current System State ---\n${dynamicCtx}`;
+      }
+    }
+    if (!isLocalLLM) {
+      const intentCtx = buildIntentContext(intent);
+      if (intentCtx) {
+        enrichedSystemPrompt += `\n\n${intentCtx}`;
+      }
+    }
+    if (this.workflowEngine && !isLocalLLM) {
+      try {
+        const activeWorkflow = await this.workflowEngine.getActiveWorkflow(params.sessionId);
+        if (activeWorkflow) {
+          enrichedSystemPrompt += `\n\n${this.workflowEngine.buildWorkflowContext(activeWorkflow)}`;
+        }
+      } catch { /* ignore */ }
+    }
+    // Inject active skill context (dynamic skill prompt context)
+    if (this.skillRegistry && !isLocalLLM) {
+      const skillCtx = this.skillRegistry.buildSkillContext();
+      if (skillCtx) {
+        enrichedSystemPrompt += `\n\n--- ${skillCtx}`;
+      }
+    }
+
+    const historyToUse = isLocalLLM ? history.slice(-4) : history;
     const messages: LLMMessage[] = [
-      { role: 'system', content: this.systemPrompt },
-      ...history.map(h => ({ role: h.role, content: h.content })),
+      { role: 'system', content: enrichedSystemPrompt },
+      ...historyToUse.map(h => ({ role: h.role, content: h.content })),
     ];
 
     const stream = this.router.chatStream({
-      model: this.config.model,
-      provider: this.config.provider,
+      model: activeModel,
+      provider: activeProvider,
       messages,
       temperature: this.config.temperature,
       maxTokens: this.config.maxTokens,
@@ -1482,9 +1587,12 @@ If everything is correct, present your final answer now. If you find issues, mak
 
     const duration = Date.now() - startTime;
 
+    // Sanitize leaked function-call markup (same as processMessage)
+    const cleanContent = sanitizeResponseContent(response.content) ?? response.content;
+
     history.push({
       role: 'assistant',
-      content: response.content,
+      content: cleanContent,
       timestamp: new Date(),
       tokenCount: response.usage.completionTokens,
       model: response.model,
@@ -1492,6 +1600,13 @@ If everything is correct, present your final answer now. If you find issues, mak
     });
 
     this.updateSessionMeta(params.sessionId, response.usage.totalTokens);
+
+    // Auto-store cross-session memory
+    this.storeSessionMemory(params.sessionId, params.content, cleanContent);
+
+    // Adaptive learning (no tool steps in stream mode)
+    this.learnFromInteraction(params.sessionId, params.content, cleanContent, [], duration);
+
     await this.smartPrune(params.sessionId);
 
     const usageRecord = this.usageTracker.track({
@@ -1506,7 +1621,7 @@ If everything is correct, present your final answer now. If you find issues, mak
 
     return {
       id: response.id,
-      content: response.content,
+      content: cleanContent,
       thinking: response.thinking,
       model: response.model,
       provider: response.provider,
@@ -1592,6 +1707,13 @@ If everything is correct, present your final answer now. If you find issues, mak
     this.conversationHistory.delete(sessionId);
     this.sessionMeta.delete(sessionId);
     this.sessionProgress.delete(sessionId);
+    this.progressListeners.delete(sessionId);
+    this.abortedSessions.delete(sessionId);
+    this.abortControllers.delete(sessionId);
+    // Clean sessionSummarized entries for this session
+    for (const key of this.sessionSummarized) {
+      if (key.startsWith(`${sessionId}-`)) this.sessionSummarized.delete(key);
+    }
     logger.debug('Session cleared', { sessionId });
   }
 
@@ -1599,6 +1721,11 @@ If everything is correct, present your final answer now. If you find issues, mak
     const count = this.conversationHistory.size;
     this.conversationHistory.clear();
     this.sessionMeta.clear();
+    this.sessionSummarized.clear();
+    this.sessionProgress.clear();
+    this.progressListeners.clear();
+    this.abortedSessions.clear();
+    this.abortControllers.clear();
     logger.info('All history cleared', { sessions: count });
   }
 

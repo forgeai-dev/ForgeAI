@@ -46,6 +46,10 @@ export function getSessionSettings(sessionId: string): SessionSettings {
   return getSettings(sessionId);
 }
 
+export function clearSessionSettings(sessionId: string): void {
+  sessionSettings.delete(sessionId);
+}
+
 // ─── Command result ────────────────────────────
 export interface CommandResult {
   handled: boolean;

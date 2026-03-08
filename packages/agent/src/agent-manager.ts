@@ -12,6 +12,7 @@ import { AgentRuntime, type ToolExecutor, type AgentResult, type SessionInfo, ty
 import { LLMRouter } from './router.js';
 import { UsageTracker, createUsageTracker } from './usage-tracker.js';
 import { MemoryManager } from './memory-manager.js';
+import { SkillRegistry } from './skill-registry.js';
 
 const logger = createLogger('Agent:Manager');
 
@@ -54,6 +55,7 @@ export class AgentManager {
   private usageTracker: UsageTracker;
   private toolExecutor: ToolExecutor | null = null;
   private memoryManager: MemoryManager | null = null;
+  private skillRegistry: SkillRegistry | null = null;
   private createdAt: Map<string, Date> = new Map();
   private delegationHistory: DelegationRecord[] = [];
   private progressBroadcaster: ((parentSessionId: string, event: AgentProgressEvent & { delegateId: string; delegateRole: string }) => void) | null = null;
@@ -127,6 +129,11 @@ export class AgentManager {
       runtime.setMemoryManager(this.memoryManager);
     }
 
+    // Attach shared skill registry for dynamic skills
+    if (this.skillRegistry) {
+      runtime.setSkillRegistry(this.skillRegistry);
+    }
+
     this.agents.set(def.id, runtime);
     this.agentDefs.set(def.id, def);
     this.createdAt.set(def.id, new Date());
@@ -179,6 +186,17 @@ export class AgentManager {
       runtime.setMemoryManager(memory);
     }
     logger.info('Memory manager set for all agents (cross-session memory enabled)');
+  }
+
+  /**
+   * Set skill registry for all agents (shared dynamic skills).
+   */
+  setSkillRegistry(registry: SkillRegistry): void {
+    this.skillRegistry = registry;
+    for (const runtime of this.agents.values()) {
+      runtime.setSkillRegistry(registry);
+    }
+    logger.info('Skill registry set for all agents (dynamic skills enabled)');
   }
 
   /**
@@ -754,8 +772,8 @@ interface CacheEntry {
 // Global cache shared across all agents in the same process
 const globalToolCache = new Map<string, CacheEntry>();
 
-// Periodic cleanup (every 60s)
-setInterval(() => {
+// Periodic cleanup (every 60s) — .unref() so timer doesn't prevent clean process exit
+const cacheCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of globalToolCache) {
     if (now - entry.cachedAt > CACHE_TTL_MS * 2) {
@@ -763,6 +781,7 @@ setInterval(() => {
     }
   }
 }, 60_000);
+cacheCleanupTimer.unref();
 
 class CachedToolExecutor implements ToolExecutor {
   private inner: ToolExecutor;

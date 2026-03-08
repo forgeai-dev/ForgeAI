@@ -2,24 +2,34 @@
 
 # 🔥 ForgeAI
 
-### The Self-Hosted AI Platform That Puts You In Control
+<a href="#">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=24&pause=1000&color=FF6B35&center=true&vCenter=true&multiline=true&repeat=true&width=700&height=80&lines=The+Self-Hosted+AI+Platform;That+Puts+You+In+Control+%F0%9F%94%A5" alt="Typing SVG" />
+</a>
 
 **Run your own AI assistant. Connect any messaging app. Use any LLM. Own every byte of your data.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2022-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![CI](https://github.com/forgeai-dev/ForgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/forgeai-dev/ForgeAI/actions)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2022-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![CI](https://img.shields.io/github/actions/workflow/status/forgeai-dev/ForgeAI/ci.yml?branch=main&style=for-the-badge&label=CI&logo=github)](https://github.com/forgeai-dev/ForgeAI/actions)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](./CONTRIBUTING.md)
 
 <br />
 
-| 8 Channels | 10 LLM Providers | 19 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
-|:---:|:---:|:---:|:---:|:---:|:---:|
+<table>
+<tr>
+<td align="center"><img src="https://img.shields.io/badge/8-Channels-FF6B35?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/10-LLM_Providers-4A90D9?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/19-Tools-28A745?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/19-Dashboard_Pages-9B59B6?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/150+-API_Endpoints-E74C3C?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/9-Security_Modules-F39C12?style=flat-square" /></td>
+</tr>
+</table>
 
 <br />
 
-[Getting Started](#-quick-start) · [Features](#-features-at-a-glance) · [Dashboard](#-dashboard-19-pages) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](./CONTRIBUTING.md)
+<a href="#-quick-start">Getting Started</a> · <a href="#-features-at-a-glance">Features</a> · <a href="#-dashboard-19-pages">Dashboard</a> · <a href="#-architecture">Architecture</a> · <a href="#-api-reference">API Reference</a> · <a href="./CONTRIBUTING.md">Contributing</a>
 
 </div>
 
@@ -28,6 +38,33 @@
 <p align="center">
   <img src="docs/screenshots/overview.png" alt="ForgeAI Dashboard Overview" width="900" />
 </p>
+
+---
+
+## 🆕 What's New
+
+<table>
+<tr>
+<td width="50%">
+
+### 🛡️ Stability & Reliability
+- **6 memory leak fixes** across session management, plan tracking, and settings cleanup
+- **Response sanitization** — DeepSeek DSML markup no longer leaks into stored history
+- **Process shutdown** — cleanup timers properly `.unref()`'d for clean Node.js exit
+- **Flaky test fixes** — CI-stable timing assertions
+
+</td>
+<td width="50%">
+
+### 🧰 New Features
+- **Skill Registry** — Install, activate, and manage custom skills with 3 handler types (script, HTTP, function)
+- **Enhanced `forge doctor`** — 5 diagnostic sections: Runtime, Configuration, LLM Providers, Services, Workspace (~25 checks)
+- **Chat Commands Plugin** — `/compact`, `/usage`, `/think` now available via plugin path for all channels
+- **CI Pipeline Expansion** — 9 unit test suites (was 3), 443 total tests
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -983,7 +1020,7 @@ All editable from **Dashboard → Workspace**.
 ```bash
 pnpm forge onboard     # Interactive first-time setup
 pnpm forge start       # Start Gateway + Dashboard
-pnpm forge doctor      # Check system health (Node, MySQL, Docker, disk)
+pnpm forge doctor      # Check system health (Runtime, Config, LLM Providers, Services, Workspace)
 pnpm forge status      # Quick status check
 ```
 
@@ -1041,6 +1078,9 @@ All core features are implemented and tested:
 - **Full Installation Freedom** — Docker image includes Python 3, pip, venv, curl, git alongside Node.js 22 and Chromium. Agent has explicit instructions to install ANY missing dependency (languages, libraries, tools) with full root access. Never substitutes technologies — if user asks for Flask, agent installs Flask
 - **Persistent Memory System** — MySQL-backed cross-session memory with real OpenAI embeddings (`text-embedding-3-small`) and TF-IDF fallback. `memory_entries` + `memory_entities` tables (migration 006, auto-applied). Entity extraction (technologies, projects, URLs, file paths). Hybrid architecture: in-memory cache for fast semantic search + MySQL for durable persistence. Graceful degradation: no OpenAI key → TF-IDF, no MySQL → in-memory only. Zero breaking changes to existing MemoryManager API
 - **Intent Classifier + Agent Workflow Engine** — Zero-cost heuristic intent classification (greeting/simple/complex/ambiguous/followup) integrated into `processMessage`. Skips tool definitions for simple intents (saves tokens). Disambiguation maps for ambiguous inputs ("online", "status", "deploy"). Agent Workflow Engine: DB-persisted state machine (`workflow_states` table, migration 007) for tracking multi-step task progress. States: pending → extracting_context → planning → executing → verifying → completed. Context injection into system prompt. MySQL persistence with in-memory fallback
+- **Skill Registry** — Dynamic skill management system. Install, activate, deactivate, and uninstall custom skills at runtime. 3 handler types: `script` (shell command), `http` (HTTP request), `function` (JavaScript). Up to 50 skills / 10 tools per skill. File-persistent store (`~/.forgeai/skills/skills.json`). Full API: `GET/POST/PUT/DELETE /api/skills`. Skill context injected into agent system prompt. 67 unit tests
+- **Enhanced `forge doctor` CLI** — Expanded from 6 basic checks to 5 diagnostic sections (~25 checks): Runtime (Node.js, pnpm, Python 3, Git), Configuration (.env, env vars, JWT/Vault strength), LLM Providers (10 providers with key detection), Services (MySQL, Gateway port, Dashboard port), Workspace (home dir, workspace dir, skills dir)
+- **Stability & Memory Leak Fixes** — 6 memory leaks fixed: `clearSession`/`clearAllHistory` now clean all Maps/Sets, `sessionPlans` and `sessionSettings` cleaned on session delete, `setInterval` timer `.unref()`'d, `processMessageStream` sanitized. CI pipeline expanded from 3 to 9 unit test suites (443 total tests)
 
 ### What's Next
 
@@ -1067,6 +1107,9 @@ All core features are implemented and tested:
 | ~~Persistent Memory (MySQL + OpenAI embeddings + entities)~~ | ✅ Done |
 | ~~Intent Classifier (zero-cost heuristic, skipTools optimization)~~ | ✅ Done |
 | ~~Agent Workflow Engine (DB-persisted state machine)~~ | ✅ Done |
+| ~~Skill Registry (dynamic skill management)~~ | ✅ Done |
+| ~~Enhanced `forge doctor` CLI (25 checks)~~ | ✅ Done |
+| ~~CI Pipeline Expansion (9 test suites, 443 tests)~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |
@@ -1086,7 +1129,7 @@ We welcome contributions! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for guide
 git clone https://github.com/forgeai-dev/ForgeAI.git
 cd ForgeAI
 pnpm install && pnpm -r build
-pnpm test    # 38 E2E tests
+pnpm test    # 443+ tests (unit + E2E)
 ```
 
 ---
@@ -1106,7 +1149,7 @@ pnpm test    # 38 E2E tests
 | **Browser** | Puppeteer (headless Chromium) |
 | **Companion** | Tauri 2, React, Rust, WebView2 (Windows) |
 | **Build** | tsup, pnpm workspaces (13 packages) |
-| **Test** | Vitest, 53+ E2E API tests |
+| **Test** | Vitest, 443+ tests (unit + E2E API) |
 | **CI/CD** | GitHub Actions (build → test → deploy) |
 | **Deploy** | Docker multi-stage, docker-compose |
 | **Observability** | OpenTelemetry (OTLP/HTTP), structured JSON logging |

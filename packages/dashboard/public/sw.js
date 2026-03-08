@@ -25,22 +25,31 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   // Network-first for API calls
   if (event.request.url.includes('/api/') || event.request.url.includes('/health')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
-    );
     return;
   }
   // Cache-first for static assets
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-      return cached || fetchPromise;
-    })
-  );
+  event.respondWith((async () => {
+    const cached = await caches.match(event.request);
+
+    try {
+      const response = await fetch(event.request);
+
+      if (response.ok) {
+        const clone = response.clone();
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(event.request, clone);
+      }
+
+      return response;
+    } catch {
+      if (cached) return cached;
+
+      if (event.request.mode === 'navigate') {
+        const appShell = await caches.match('/');
+        if (appShell) return appShell;
+      }
+
+      return new Response('', { status: 503, statusText: 'Offline' });
+    }
+  })());
 });
