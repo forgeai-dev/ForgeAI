@@ -16,8 +16,9 @@ export interface ToolExecutor {
 }
 
 // Safety cap: hard limit on tool-calling iterations to prevent runaway loops.
+// 200 is effectively unlimited for any real task (complex tasks typically use 20-30).
 // The agent can still finish earlier (no tool calls = done). This only prevents infinite spinning.
-const DEFAULT_MAX_ITERATIONS = 50;
+const DEFAULT_MAX_ITERATIONS = 200;
 const MAX_RESULT_CHARS = 1500;
 
 const logger = createLogger('Agent:Runtime');
