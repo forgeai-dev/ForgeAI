@@ -226,18 +226,9 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 
 ### Security Modules (17)
 
-```
-Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ──→ [RBAC] ──→ [Input Sanitizer] ──→ [Prompt Guard] ──→ Agent
-                                    │                                           │                              │
-                              [Smart IP Detection]                     [Model Security           [Tool Output Sanitizer]
-                              Local? → PIN + 2FA                        Profiles]                (indirect injection scan)
-                              External? → PIN + 2FA + Email OTP          │                              │
-                                                                   [Audit Log]              [Sensitive File Guard]
-                                                                   (every action)           [Exfiltration Prevention]
-                                                                   [Vault]                  [Persistence Blocker]
-                                                                   (encrypted secrets)      [Network Egress Control]
-                                                                                            [Sandbox Isolation]
-```
+<p align="center">
+  <img src="docs/images/security-architecture.png" alt="Security Architecture" width="100%" />
+</p>
 
 | Module | Implementation |
 |:-------|:---------------|
@@ -828,60 +819,9 @@ API endpoints:
 
 ## 🏗 Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          MESSAGING CHANNELS                              │
-│   WhatsApp  ·  Telegram  ·  Discord  ·  Slack  ·  Teams  ·  Google Chat │
-│                   ·  WebChat  ·  Node Protocol (IoT)  ·                  │
-└─────────────────────────────────┬───────────────────────────────────────┘
-                                  │ messages
-                    ┌─────────────▼─────────────┐
-                    │      SECURITY LAYER        │
-                    │  Rate Limiter · IP Filter   │
-                    │  JWT · RBAC · 2FA           │
-                    │  Email OTP · Smart IP Det.  │
-                    │  Prompt Guard · Sanitizer   │
-                    │  Audit Log · Vault          │
-                    └─────────────┬──────────────┘
-                                  │ authenticated
-                    ┌─────────────▼──────────────┐
-                    │     GATEWAY (Fastify 5)      │
-                    │  140+ REST API endpoints     │
-                    │  WebSocket (real-time)        │
-                    │  Session Manager · Plugins    │
-                    │  Workflow Engine · Cron        │
-                    │  Serves Dashboard (React SPA) │
-                    └──────┬──────────┬──────────┘
-                           │          │
-              ┌────────────▼──┐  ┌────▼──────────┐
-              │  AGENT LAYER   │  │   TOOL LAYER   │
-              │                │  │                 │
-              │ AgentManager   │  │ 19 built-in     │
-              │ AgentRuntime   │  │ MCP Client      │
-              │ LLM Router     │  │ Tool Registry   │
-              │ 10 providers   │  │ Forge Teams     │
-              │ Circuit breaker│  │ Sandbox (Docker) │
-              │ Failover chain │  └────────┬────────┘
-              │ Agentic loop   │           │
-              │ Intent Classifier│           │
-              │ Workflow Engine │           │
-              │ Prompt Optimizer│ ┌────────▼────────┐
-              └────────────────┘  │  INTEGRATIONS    │
-                                  │  GitHub · Gmail  │
-                                  │  Calendar ·Notion│
-                                  │  RSS · Webhooks  │
-                                  └─────────────────┘
-                                          │
-                    ┌─────────────────────▼──────────────────────┐
-                    │              PERSISTENCE                     │
-                    │  MySQL 8 (Knex.js) · 13 tables               │
-                    │  Credential Vault (AES-256-GCM, file-based)  │
-                    │  Chat History (JSON, session-based)           │
-                    │  Memory Store (MySQL + OpenAI embeddings)     │
-                    │  Entity Store (auto-extracted knowledge)      │
-                    │  RAG Engine (chunked embeddings)              │
-                    └─────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="mermaid-diagram.png" alt="ForgeAI Architecture" width="100%" />
+</p>
 
 ### 13-Package Monorepo
 
