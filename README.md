@@ -226,9 +226,7 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 
 ### Security Modules (17)
 
-<p align="center">
-  <img src="docs/images/security-architecture.png" alt="Security Architecture" width="100%" />
-</p>
+![Security Architecture](docs/images/security-architecture.png)
 
 | Module | Implementation |
 |:-------|:---------------|
@@ -819,9 +817,7 @@ API endpoints:
 
 ## 🏗 Architecture
 
-<p align="center">
-  <img src="mermaid-diagram.png" alt="ForgeAI Architecture" width="100%" />
-</p>
+![ForgeAI Architecture](docs/images/mermaid-diagram.png)
 
 ### 13-Package Monorepo
 
