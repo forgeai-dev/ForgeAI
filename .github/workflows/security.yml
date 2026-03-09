@@ -217,7 +217,7 @@ jobs:
           # 2. Reverse shell patterns
           echo ""
           echo "── Checking: Reverse shell patterns ──"
-          REVSHELL=$(echo "$FILES" | xargs grep -HnE '(\/bin\/(ba)?sh|nc\s+-e|\bncat\b|\bsocat\b|\/dev\/tcp|mkfifo|telnet\s+\d)' 2>/dev/null | grep -v '// safe:' | grep -v node_modules | grep -v 'concat' | grep -v 'truncat' | grep -v 'shell-exec.ts' | grep -v 'runtime.ts' | grep -v 'desktop-automation.ts' || true)
+          REVSHELL=$(echo "$FILES" | xargs grep -HnE '(\/bin\/(ba)?sh|nc\s+-e|\bncat\b|\bsocat\b|\/dev\/tcp|mkfifo|telnet\s+\d)' 2>/dev/null | grep -v '// safe:' | grep -v node_modules | grep -v 'concat' | grep -v 'truncat' | grep -v 'shell-exec.ts' | grep -v 'runtime.ts' | grep -v 'desktop-automation.ts' | grep -v 'tool-output-sanitizer.ts' | grep -v 'network-egress.ts' | grep -v 'security-hardening.test.ts' || true)
           if [ -n "$REVSHELL" ]; then
             echo "❌ Reverse shell pattern detected:"
             echo "$REVSHELL"
@@ -274,7 +274,7 @@ jobs:
           # 7. Suspicious DNS / domain patterns
           echo ""
           echo "── Checking: Suspicious domains ──"
-          SUSP_DOMAINS=$(echo "$FILES" | xargs grep -HnEi '(ngrok\.io|requestbin|burpcollaborator|interact\.sh|oast\.|pipedream\.net|webhook\.site)' 2>/dev/null | grep -v node_modules || true)
+          SUSP_DOMAINS=$(echo "$FILES" | xargs grep -HnEi '(ngrok\.io|requestbin|burpcollaborator|interact\.sh|oast\.|pipedream\.net|webhook\.site)' 2>/dev/null | grep -v node_modules | grep -v 'network-egress.ts' | grep -v 'security-hardening.test.ts' || true)
           if [ -n "$SUSP_DOMAINS" ]; then
             echo "❌ Suspicious exfiltration domains detected:"
             echo "$SUSP_DOMAINS"

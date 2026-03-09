@@ -23,7 +23,7 @@
 <td align="center"><img src="https://img.shields.io/badge/19-Tools-28A745?style=flat-square" /></td>
 <td align="center"><img src="https://img.shields.io/badge/19-Dashboard_Pages-9B59B6?style=flat-square" /></td>
 <td align="center"><img src="https://img.shields.io/badge/150+-API_Endpoints-E74C3C?style=flat-square" /></td>
-<td align="center"><img src="https://img.shields.io/badge/9-Security_Modules-F39C12?style=flat-square" /></td>
+<td align="center"><img src="https://img.shields.io/badge/17-Security_Modules-F39C12?style=flat-square" /></td>
 </tr>
 </table>
 
@@ -47,20 +47,30 @@
 <tr>
 <td width="50%">
 
+### 🔒 Security Hardening (8 new layers)
+- **Tool Output Sanitizer** — 38-pattern scanner blocks indirect prompt injection from web pages, files, and search results before they reach the LLM
+- **Sensitive File Guard** — 30+ patterns detect `.env`, SSH keys, AWS credentials; password databases (`/etc/shadow`, SAM) fully blocked
+- **Exfiltration Prevention** — 7 regex block `curl/wget/scp/nc` with sensitive data in `shell_exec`
+- **Persistence Blocker** — 18 regex block reverse shells, crontab, SSH key injection, systemd services, Windows scheduled tasks in both `shell_exec` and `file_manager`
+- **Model Security Profiles** — 28 LLM models mapped to 3 security tiers; vulnerable models (GPT-3.5, Ollama) get 43% stricter thresholds
+- **Network Egress Control** — 40+ exfiltration domains blocked + SSRF prevention (AWS/GCP/Azure metadata endpoints)
+- **Sandbox by default** — `code_runner` sandboxed with Docker (`--read-only`, `--no-new-privileges`, `--network none`)
+- **System prompt defense** — explicit indirect prompt injection awareness injected into LLM instructions
+
+</td>
+<td width="50%">
+
 ### 🛡️ Stability & Reliability
 - **6 memory leak fixes** across session management, plan tracking, and settings cleanup
 - **Response sanitization** — DeepSeek DSML markup no longer leaks into stored history
 - **Process shutdown** — cleanup timers properly `.unref()`'d for clean Node.js exit
 - **Flaky test fixes** — CI-stable timing assertions
 
-</td>
-<td width="50%">
-
 ### 🧰 New Features
 - **Skill Registry** — Install, activate, and manage custom skills with 3 handler types (script, HTTP, function)
 - **Enhanced `forge doctor`** — 5 diagnostic sections: Runtime, Configuration, LLM Providers, Services, Workspace (~25 checks)
 - **Chat Commands Plugin** — `/compact`, `/usage`, `/think` now available via plugin path for all channels
-- **CI Pipeline Expansion** — 9 unit test suites (was 3), 443 total tests
+- **CI Pipeline Expansion** — 10 unit test suites, 514+ total tests
 
 </td>
 </tr>
@@ -72,10 +82,10 @@
 
 ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built from scratch in TypeScript. It connects your AI to WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and **IoT/embedded devices** via the Node Protocol — all managed through a modern 19-page dashboard.
 
-Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 9 security modules before reaching the agent.
+Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 17 security modules before reaching the agent.
 
 ```
-Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 19 Tools ──→ Response
+Your Messages ──→ 17 Security Layers ──→ Agent (any LLM) ──→ 19 Tools ──→ Response
      ↑                                                              ↓
   WhatsApp                                                    Browse web
   Telegram                                                    Run code
@@ -96,7 +106,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 19
 <td width="50%">
 
 ### 🔒 Security-First Architecture
-9 security modules active by default. AES-256-GCM encrypted vault, RBAC, rate limiting, prompt injection detection, input sanitization, 2FA, **Email OTP** for external access, and immutable audit logging. **First-run Setup Wizard** guides you through SMTP, 2FA, and admin PIN configuration. Smart IP detection automatically applies stricter authentication for external (VPS/internet) access. Your API keys and tokens are **never** stored in plain text.
+17 security modules active by default. AES-256-GCM encrypted vault, RBAC, rate limiting, prompt injection detection, input sanitization, 2FA, **Email OTP** for external access, immutable audit logging, **tool output sanitization** (indirect prompt injection defense), **sensitive file guard**, **exfiltration prevention**, **persistence blocker**, **model-aware security profiles**, **network egress control**, and **sandbox isolation**. **First-run Setup Wizard** guides you through SMTP, 2FA, and admin PIN configuration. Smart IP detection automatically applies stricter authentication for external (VPS/internet) access. Your API keys and tokens are **never** stored in plain text.
 
 ### 🌐 True Multi-Channel
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
@@ -214,14 +224,19 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `agent_delegate` | Delegate tasks to temporary specialist sub-agents that run in parallel. Each sub-agent has full tool access and works independently. |
 | `forge_team` | **Forge Teams** — Create coordinated teams of specialist agents with dependency graphs. Independent tasks run in parallel; dependent tasks wait for upstream results and receive them as context. Supports up to 5 workers per team. |
 
-### Security Modules (9)
+### Security Modules (17)
 
 ```
 Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ──→ [RBAC] ──→ [Input Sanitizer] ──→ [Prompt Guard] ──→ Agent
-                                    │                                                                  ↓
-                              [Smart IP Detection]                                          [Audit Log] (every action)
-                              Local? → PIN + 2FA                                            [Vault] (encrypted secrets)
-                              External? → PIN + 2FA + Email OTP (4-factor)
+                                    │                                           │                              │
+                              [Smart IP Detection]                     [Model Security           [Tool Output Sanitizer]
+                              Local? → PIN + 2FA                        Profiles]                (indirect injection scan)
+                              External? → PIN + 2FA + Email OTP          │                              │
+                                                                   [Audit Log]              [Sensitive File Guard]
+                                                                   (every action)           [Exfiltration Prevention]
+                                                                   [Vault]                  [Persistence Blocker]
+                                                                   (encrypted secrets)      [Network Egress Control]
+                                                                                            [Sandbox Isolation]
 ```
 
 | Module | Implementation |
@@ -229,12 +244,20 @@ Request ──→ [Rate Limiter] ──→ [IP Filter] ──→ [JWT Auth] ─�
 | **Credential Vault** | AES-256-GCM encryption, PBKDF2 key derivation (310k iterations), file-persistent |
 | **RBAC** | Role-based (admin/user/guest) per resource, per tool, per endpoint |
 | **Rate Limiter** | 12 rules: per-user, per-channel, per-tool, per-IP. Sliding window + burst |
-| **Prompt Injection Guard** | 6 patterns: direct injection, role hijacking, encoding, delimiters, context manipulation, multi-language |
+| **Prompt Injection Guard** | 27 patterns: direct injection, role hijacking, encoding, delimiters, context manipulation, multi-language |
 | **Input Sanitizer** | Blocks XSS, SQL injection, command injection, path traversal |
 | **2FA (TOTP)** | Time-based one-time passwords via Google Authenticator, Authy, etc. |
 | **Email OTP** | 6-digit verification codes sent to admin email for external access (5-min expiry, rate-limited) |
 | **Audit Log** | Immutable, 4 risk levels (low/medium/high/critical), queryable via API + Dashboard |
 | **Setup Wizard** | First-run guided setup: SMTP, 2FA, admin PIN — no config files needed |
+| **Tool Output Sanitizer** | 38-pattern indirect prompt injection scanner on tool outputs (web pages, files, search results) before LLM context injection |
+| **Sensitive File Guard** | 30+ patterns block/tag reads of `.env`, SSH keys, credentials, vault files, PEM/KEY. Password databases fully blocked |
+| **Exfiltration Prevention** | 7 regex block `curl/wget/scp/nc` commands that pipe sensitive files to external destinations |
+| **Persistence Blocker** | 18 regex block reverse shells, crontab manipulation, SSH key injection, systemd services, Windows scheduled tasks — in both `shell_exec` and `file_manager` |
+| **Model Security Profiles** | 28 LLM models mapped to 3 tiers (high/medium/low). Vulnerable models get 43% stricter PromptGuard thresholds |
+| **Network Egress Control** | 40+ exfiltration domains blocked (webhook.site, requestbin, pastebin, ngrok, etc.) + SSRF prevention (AWS/GCP/Azure metadata) |
+| **Sandbox Isolation** | Docker containers with `--read-only`, `--no-new-privileges`, `--network none`, memory/CPU limits. Enabled by default for `code_runner` |
+| **System Prompt Defense** | Explicit indirect prompt injection awareness rules injected into LLM system prompt (6 defense rules) |
 
 #### Smart Local vs External Detection
 
