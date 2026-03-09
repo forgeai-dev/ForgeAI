@@ -26,7 +26,7 @@ export interface SandboxResult {
 }
 
 const DEFAULT_CONFIG: SandboxConfig = {
-  enabled: false,
+  enabled: true,
   image: 'node:22-slim',
   memoryLimit: '256m',
   cpuLimit: '0.5',

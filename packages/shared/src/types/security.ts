@@ -41,7 +41,11 @@ export type AuditAction =
   | 'auth.email_otp_sent'
   | 'auth.email_otp_verified'
   | 'auth.email_otp_failed'
-  | 'auth.pin_changed';
+  | 'auth.pin_changed'
+  | 'tool.indirect_injection_blocked'
+  | 'tool.sensitive_file_blocked'
+  | 'tool.exfiltration_blocked'
+  | 'tool.persistence_blocked';
 
 export interface AuditLogEntry {
   id: string;

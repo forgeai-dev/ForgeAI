@@ -41,6 +41,61 @@ function isProtectedPath(absPath: string): boolean {
   return patterns.some(p => p.test(normalized));
 }
 
+// ─── Sensitive File Guard (S2): Files containing credentials/secrets ───
+// These files are allowed to READ (agent may need them for diagnostics),
+// but a warning is attached so the ToolOutputSanitizer can flag exfiltration attempts.
+const SENSITIVE_FILE_PATTERNS = [
+  /\.env$/i,
+  /\.env\.\w+$/i,
+  /\.env\.local$/i,
+  /\.env\.production$/i,
+  /id_rsa$/,
+  /id_ed25519$/,
+  /id_ecdsa$/,
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /\.pfx$/i,
+  /\.jks$/i,
+  /authorized_keys$/,
+  /known_hosts$/,
+  /credentials$/,
+  /\.aws\/credentials$/,
+  /\.aws\/config$/,
+  /\.kube\/config$/,
+  /\.docker\/config\.json$/,
+  /\.npmrc$/,
+  /\.pypirc$/,
+  /\.netrc$/,
+  /\.git-credentials$/,
+  /shadow$/,
+  /gshadow$/,
+  /master\.key$/,
+  /vault\.json$/i,
+  /secrets?\.\w+$/i,
+  /token\.json$/i,
+  /service[_-]?account[_-]?key\.json$/i,
+  /firebase[_-]?adminsdk.*\.json$/i,
+];
+
+
+function isSensitiveFile(absPath: string): boolean {
+  const normalized = absPath.replace(/\\/g, '/');
+  return SENSITIVE_FILE_PATTERNS.some(p => p.test(normalized));
+}
+
+function isBlockedReadFile(absPath: string): boolean {
+  const normalized = absPath.replace(/\\/g, '/');
+  // Only match specific system paths, not random files named "system.txt"
+  if (/\/etc\/shadow$/.test(normalized)) return true;
+  if (/\/etc\/gshadow$/.test(normalized)) return true;
+  if (/\/etc\/master\.passwd$/.test(normalized)) return true;
+  if (/[\\/]windows[\\/]system32[\\/]config[\\/]sam$/i.test(absPath)) return true;
+  if (/[\\/]windows[\\/]system32[\\/]config[\\/]system$/i.test(absPath)) return true;
+  if (/ntds\.dit$/i.test(normalized)) return true;
+  return false;
+}
+
 export class FileManagerTool extends BaseTool {
   private workspaceRoot: string;
 
@@ -104,6 +159,42 @@ On Windows: silent operations without opening any visible window.`,
       };
     }
 
+    // ─── S2: Sensitive File Guard — block reads of password databases & critical system secrets ───
+    if (action === 'read' && isBlockedReadFile(targetPath)) {
+      this.logger.warn('BLOCKED read of highly sensitive file', { path: targetPath });
+      return {
+        success: false,
+        error: `🛡️ BLOCKED: Reading "${targetPath}" is not allowed. This file contains highly sensitive system credentials (password hashes, SAM database, AD database). Access is denied for security.`,
+        duration: 0,
+      };
+    }
+
+    // ─── S4: Persistence Guard — block write/move/copy to security-critical files via file_manager ───
+    if (['write', 'move', 'copy'].includes(action)) {
+      const writeDest = action === 'copy' || action === 'move' ? (dest ? this.resolvePath(dest) : targetPath) : targetPath;
+      const normalizedDest = writeDest.replace(/\\/g, '/');
+      const PERSISTENCE_WRITE_BLOCKS = [
+        /\/\.ssh\/authorized_keys$/i,
+        /\/\.ssh\/id_rsa$/i,
+        /\/\.ssh\/id_ed25519$/i,
+        /\/etc\/cron\.d\//i,
+        /\/etc\/crontab$/i,
+        /\/var\/spool\/cron\//i,
+        /\/etc\/systemd\/system\/.*\.service$/i,
+        /\/etc\/rc\.local$/i,
+        /\/etc\/init\.d\//i,
+        /\\start menu\\programs\\startup\\/i,
+      ];
+      if (PERSISTENCE_WRITE_BLOCKS.some(p => p.test(normalizedDest) || p.test(writeDest))) {
+        this.logger.warn('BLOCKED persistence write via file_manager', { path: writeDest, action });
+        return {
+          success: false,
+          error: `🛡️ BLOCKED: Cannot ${action} to "${writeDest}". Writing to SSH keys, crontab, systemd services, or startup directories is blocked for security. Use shell_exec with explicit commands if this is intentional.`,
+          duration: 0,
+        };
+      }
+    }
+
     try {
       const { result, duration } = await this.timed(async () => {
         switch (action) {
@@ -113,6 +204,20 @@ On Windows: silent operations without opening any visible window.`,
               throw new Error(`File too large: ${stats.size} bytes (max ${MAX_FILE_SIZE})`);
             }
             const data = await readFile(targetPath, encoding);
+            // S2: Tag sensitive file reads so ToolOutputSanitizer can detect exfiltration
+            const sensitive = isSensitiveFile(targetPath);
+            if (sensitive) {
+              this.logger.warn('Reading sensitive file', { path: targetPath });
+              return {
+                content: data,
+                size: stats.size,
+                path: targetPath,
+                __sensitive: true,
+                __sensitiveWarning: `⚠️ SENSITIVE FILE: "${targetPath}" contains credentials/secrets. ` +
+                  `DO NOT share, upload, POST, curl, or transmit this content to ANY external URL, API, or service. ` +
+                  `Only use this data locally for configuration or diagnostics.`,
+              };
+            }
             return { content: data, size: stats.size, path: targetPath };
           }
 

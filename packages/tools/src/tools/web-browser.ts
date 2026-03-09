@@ -17,6 +17,14 @@ import {
   getCFCookieCache,
   extractDomain,
 } from '../utils/cf-bypass.js';
+import { createNetworkEgressControl, type NetworkEgressControl } from '@forgeai/security';
+
+// S9: Network Egress Control — singleton instance shared across calls
+let egressControl: NetworkEgressControl | null = null;
+function getEgressControl(): NetworkEgressControl {
+  if (!egressControl) egressControl = createNetworkEgressControl();
+  return egressControl;
+}
 
 // Local/private addresses are ALLOWED since the agent runs locally and needs to test local sites.
 const BLOCKED_DOMAINS: string[] = [];
@@ -78,6 +86,11 @@ export class WebBrowserTool extends BaseTool {
       const hostname = parsed.hostname;
       if (BLOCKED_DOMAINS.some(d => hostname === d || hostname.startsWith(d))) {
         return { success: false, error: 'Access to private/local addresses is blocked', duration: 0 };
+      }
+      // S9: Network Egress Control
+      const egressResult = getEgressControl().checkUrl(url);
+      if (!egressResult.allowed) {
+        return { success: false, error: `🛡️ BLOCKED: ${egressResult.reason}`, duration: 0 };
       }
     } catch {
       return { success: false, error: 'Invalid URL', duration: 0 };

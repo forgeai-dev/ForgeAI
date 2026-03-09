@@ -23,3 +23,7 @@ export { AccessTokenManager, createAccessTokenManager } from './access-token.js'
 export type { AccessToken, AccessTokenConfig } from './access-token.js';
 export { EmailOTPService, createEmailOTPService } from './email-otp.js';
 export type { SMTPConfig, PendingEmailOTP } from './email-otp.js';
+export { ToolOutputSanitizer, createToolOutputSanitizer } from './tool-output-sanitizer.js';
+export type { ToolOutputScanResult, ToolOutputSanitizerConfig, IndirectInjectionThreat, IndirectThreatType } from './tool-output-sanitizer.js';
+export { NetworkEgressControl, createNetworkEgressControl } from './network-egress.js';
+export type { NetworkEgressConfig, EgressCheckResult } from './network-egress.js';

@@ -5,6 +5,14 @@ import { execFile } from 'node:child_process';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
 import { DEFAULT_GATEWAY_PORT, DEFAULT_WS_PORT, resolveWorkspaceRoot } from '@forgeai/shared';
+import { createNetworkEgressControl, type NetworkEgressControl } from '@forgeai/security';
+
+// S9: Network Egress Control — singleton
+let egressControl: NetworkEgressControl | null = null;
+function getEgressControl(): NetworkEgressControl {
+  if (!egressControl) egressControl = createNetworkEgressControl();
+  return egressControl;
+}
 
 // ─── Security: hard-blocked patterns that would DESTROY the OS ───
 // Only truly catastrophic, irreversible commands. Everything else is allowed.
@@ -82,6 +90,61 @@ const HARD_BLOCKED_REGEX = [
   /(?:remove-item|del|rd|rmdir)\s+.*(?:c:\\windows|system32)/i,
   // Windows: wipe ALL user profiles (only blocks c:\users root, NOT c:\users\<name>\subdir)
   /(?:remove-item|del|rd|rmdir)\s+[^\S]*["']?c:\\users["']?\s*(?:$|[-\/;|&>])/i,
+];
+
+// ─── S3: Exfiltration Prevention — block data exfiltration patterns ───
+const EXFILTRATION_BLOCKED_REGEX = [
+  // curl/wget POST/PUT with sensitive file content or piped data
+  /(?:curl|wget)\s+.*-(?:d|data|data-binary|upload-file)\s+.*(?:\.env|id_rsa|id_ed25519|shadow|credentials|vault\.json|\.pem|\.key|authorized_keys|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.git-credentials|master\.key|secrets?\.)/i,
+  // curl POST to external URLs with @file syntax (reads local files)
+  /curl\s+.*-(?:d|F|data)\s+@\s*(?:\/|~|\.)\S*(?:\.env|id_rsa|shadow|credentials|vault|\.pem|\.key|secrets?)/i,
+  // Piping sensitive files to curl/wget/nc/ncat
+  /cat\s+.*(?:\.env|id_rsa|id_ed25519|shadow|credentials|vault\.json|\.pem|\.key|authorized_keys|master\.key|secrets?).*\|\s*(?:curl|wget|nc|ncat|netcat|socat)/i,
+  // scp/rsync sensitive files to external hosts
+  /(?:scp|rsync)\s+.*(?:\.env|id_rsa|id_ed25519|shadow|credentials|vault\.json|\.pem|\.key|authorized_keys|master\.key|secrets?)\s+\S+@\S+:/i,
+  // base64 encode + send pattern
+  /base64\s+(?:\/|~|\.)\S*(?:\.env|id_rsa|shadow|credentials|vault|\.pem|\.key|secrets?).*\|\s*(?:curl|wget|nc)/i,
+  // PowerShell: Invoke-WebRequest/Invoke-RestMethod with sensitive file content
+  /(?:invoke-webrequest|invoke-restmethod|iwr|irm)\s+.*-body.*(?:get-content|gc|cat|type).*(?:\.env|id_rsa|credentials|vault|\.pem|\.key|secrets?)/i,
+  // PowerShell: sending file content via .NET
+  /\[system\.io\.file\]::readalltext.*(?:\.env|id_rsa|credentials|vault|\.pem|\.key|secrets?)/i,
+];
+
+// ─── S4: Persistence Mechanism Blocker — block backdoor installation ───
+const PERSISTENCE_BLOCKED_REGEX = [
+  // SSH key injection into authorized_keys
+  /(?:echo|printf|cat|tee)\s+.*(?:ssh-rsa|ssh-ed25519|ssh-ecdsa|ecdsa-sha2)\s+.*>>?\s*.*authorized_keys/i,
+  />>?\s*~?\/?\.ssh\/authorized_keys/i,
+  // Crontab manipulation (adding entries via pipe)
+  /(?:echo|printf|cat)\s+.*\|\s*crontab/i,
+  /crontab\s+-[re]/i,  // -e (edit) or -r (remove all) — both dangerous
+  // Writing to system crontab files directly
+  />>?\s*\/etc\/cron/i,
+  />>?\s*\/var\/spool\/cron/i,
+  // Reverse shells
+  /bash\s+-i\s+>&?\s*\/dev\/tcp\//i,
+  /\/dev\/tcp\/\S+\/\d+/,
+  /(?:nc|ncat|netcat)\s+.*-[elp]/i,
+  /socat\s+.*TCP[46]?:/i,
+  /python[23]?\s+.*socket.*connect/i,
+  /perl\s+.*socket.*connect/i,
+  /ruby\s+.*TCPSocket/i,
+  /php\s+.*fsockopen/i,
+  // Systemd service creation/enable (creating persistent services)
+  /systemctl\s+(?:enable|unmask)\s+/i,
+  />>?\s*\/etc\/systemd\/system\//i,
+  // rc.local / init.d persistence
+  />>?\s*\/etc\/rc\.local/i,
+  />>?\s*\/etc\/init\.d\//i,
+  // Windows: scheduled task creation (persistence)
+  /schtasks\s+\/create/i,
+  /register-scheduledjob/i,
+  /new-scheduledtask/i,
+  // Windows: registry run key persistence
+  /reg\s+add\s+.*\\run\\/i,
+  /set-itemproperty\s+.*\\run\\/i,
+  // Windows: startup folder manipulation
+  />>?\s*.*\\start\s*menu\\programs\\startup\\/i,
 ];
 
 // Patterns that are logged as HIGH RISK but always allowed (just audit trail)
@@ -225,7 +288,42 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       return selfProtectBlock;
     }
 
-    // ─── Security Layer 3: Flag high-risk commands (allowed but logged) ───
+    // ─── Security Layer 3: Exfiltration Prevention (S3) ───
+    for (const regex of EXFILTRATION_BLOCKED_REGEX) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED data exfiltration attempt', { command, pattern: regex.source });
+        return {
+          success: false,
+          error: `🛡️ BLOCKED: This command attempts to exfiltrate sensitive data (credentials, keys, secrets) to an external destination. Sending .env, SSH keys, vault data, or credentials via curl/wget/scp/nc is not allowed.`,
+          duration: 0,
+        };
+      }
+    }
+
+    // ─── Security Layer 4: Persistence Mechanism Blocker (S4) ───
+    for (const regex of PERSISTENCE_BLOCKED_REGEX) {
+      if (regex.test(command)) {
+        this.logger.warn('BLOCKED persistence/backdoor attempt', { command, pattern: regex.source });
+        return {
+          success: false,
+          error: `🛡️ BLOCKED: This command attempts to install a persistence mechanism or backdoor (SSH key injection, crontab manipulation, reverse shell, systemd service creation, scheduled tasks). These operations are blocked for security.`,
+          duration: 0,
+        };
+      }
+    }
+
+    // ─── Security Layer 5: Network Egress Control (S9) ───
+    const egressResult = getEgressControl().checkShellCommand(command);
+    if (!egressResult.allowed) {
+      this.logger.warn('BLOCKED outbound network call', { command: command.substring(0, 200), reason: egressResult.reason });
+      return {
+        success: false,
+        error: `🛡️ BLOCKED: ${egressResult.reason}`,
+        duration: 0,
+      };
+    }
+
+    // ─── Security Layer 6: Flag high-risk commands (allowed but logged) ───
     const risks: string[] = [];
     for (const pattern of HIGH_RISK_PATTERNS) {
       if (lowerCmd.includes(pattern.toLowerCase())) {
