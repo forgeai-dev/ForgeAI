@@ -88,7 +88,7 @@ jobs:
           path: packages/
 
       - name: Run unit tests
-        run: npx vitest run tests/security.test.ts tests/shared-utils.test.ts tests/agent.test.ts tests/skill-registry.test.ts tests/forge-team.test.ts tests/intent-classifier.test.ts tests/prompt-optimizer.test.ts tests/auto-planner.test.ts tests/workflow-engine.test.ts tests/security-hardening.test.ts --reporter=verbose
+        run: npx vitest run tests/security.test.ts tests/shared-utils.test.ts tests/agent.test.ts tests/skill-registry.test.ts tests/forge-team.test.ts tests/intent-classifier.test.ts tests/prompt-optimizer.test.ts tests/auto-planner.test.ts tests/workflow-engine.test.ts tests/security-hardening.test.ts tests/security-audit-fixes.test.ts --reporter=verbose
 
   test:
     name: API Tests

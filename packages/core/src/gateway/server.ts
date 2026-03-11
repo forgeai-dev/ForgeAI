@@ -469,8 +469,10 @@ export class Gateway {
           });
 
           // Hard enforcement by default: block ALL non-admin requests to admin routes.
-          // Set RBAC_ENFORCE=false to revert to soft mode (allow anonymous through).
-          const softMode = process.env['RBAC_ENFORCE'] === 'false';
+          // Automatically soft when GATEWAY_AUTH=false (dev/test mode).
+          // Set RBAC_ENFORCE=false to manually revert to soft mode.
+          const authDisabled = process.env['GATEWAY_AUTH'] === 'false';
+          const softMode = authDisabled || process.env['RBAC_ENFORCE'] === 'false';
           if (!softMode) {
             reply.status(403).send({ error: 'Access denied', requiredRole: 'admin', path, method });
             return;
