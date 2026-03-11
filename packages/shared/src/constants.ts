@@ -1,5 +1,5 @@
 export const APP_NAME = 'ForgeAI';
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '1.2.0';
 export const APP_DESCRIPTION = 'Security-first personal AI assistant';
 
 export const DEFAULT_GATEWAY_HOST = '127.0.0.1';
