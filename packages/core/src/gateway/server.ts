@@ -85,6 +85,42 @@ export class Gateway {
   private static readonly AUTH_RATE_LIMIT = 5; // max attempts
   private static readonly AUTH_RATE_WINDOW = 60_000; // 1 minute window
 
+  // Trusted Docker/private network CIDRs — only trust proxy headers from these
+  private static readonly TRUSTED_PROXIES = new Set([
+    '172.18.0.', '172.17.0.', '10.', '192.168.', '127.0.0.1', '::1', '::ffff:127.0.0.1',
+  ]);
+
+  /**
+   * Extract real client IP from reverse proxy headers (Caddy/nginx).
+   * Only trusts X-Forwarded-For / X-Real-IP when the socket IP is a known
+   * Docker/private network address (i.e. the request came through Caddy).
+   * Falls back to request.ip (socket IP) for direct connections.
+   */
+  static getClientIp(request: FastifyRequest): string {
+    const socketIp = (request.socket.remoteAddress || request.ip || '').replace('::ffff:', '');
+
+    // Only trust proxy headers when the direct connection is from a private/Docker network
+    const isTrustedProxy = Gateway.TRUSTED_PROXIES.has(socketIp) ||
+      Array.from(Gateway.TRUSTED_PROXIES).some(prefix => socketIp.startsWith(prefix));
+
+    if (isTrustedProxy) {
+      // X-Forwarded-For: client, proxy1, proxy2 — first IP is the real client
+      const xff = request.headers['x-forwarded-for'];
+      if (xff) {
+        const firstIp = (Array.isArray(xff) ? xff[0] : xff).split(',')[0].trim();
+        if (firstIp) return firstIp;
+      }
+      // X-Real-IP: single client IP set by the proxy
+      const xri = request.headers['x-real-ip'];
+      if (xri) {
+        const realIp = Array.isArray(xri) ? xri[0] : xri;
+        if (realIp) return realIp.trim();
+      }
+    }
+
+    return socketIp || 'unknown';
+  }
+
   private host: string;
   private port: number;
 
@@ -366,12 +402,13 @@ export class Gateway {
           try {
             const payload = this.auth.verifyAccessToken(jwt);
             // IP binding: reject if token was issued for a different IP
-            if (payload.ipAddress && payload.ipAddress !== request.ip) {
+            const clientIp = Gateway.getClientIp(request);
+            if (payload.ipAddress && payload.ipAddress !== clientIp) {
               this.auditLogger.log({
                 action: 'auth.ip_mismatch',
                 userId: payload.userId,
-                ipAddress: request.ip,
-                details: { tokenIp: payload.ipAddress, requestIp: request.ip },
+                ipAddress: clientIp,
+                details: { tokenIp: payload.ipAddress, requestIp: clientIp },
                 success: false,
                 riskLevel: 'critical',
               });
@@ -462,7 +499,7 @@ export class Gateway {
           this.auditLogger.log({
             action: 'security.rbac_denied',
             userId,
-            ipAddress: request.ip,
+            ipAddress: Gateway.getClientIp(request),
             details: { path, method, role, hasToken },
             success: false,
             riskLevel: 'high',
@@ -481,6 +518,14 @@ export class Gateway {
       }
     });
 
+    // IP blacklist enforcement — checked before everything else
+    this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      const ip = Gateway.getClientIp(request);
+      if (!this.ipFilter.isAllowed(ip)) {
+        reply.status(403).send({ error: 'Forbidden' });
+      }
+    });
+
     // Rate limiting middleware
     this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
       // Skip rate limiting for polling/health endpoints
@@ -488,17 +533,20 @@ export class Gateway {
       if (RATE_LIMIT_EXEMPT.has(path)) return;
       if (RATE_LIMIT_PREFIX_EXEMPT.some(prefix => path.startsWith(prefix))) return;
 
-      const ip = request.ip || 'unknown';
+      const ip = Gateway.getClientIp(request);
       const result = this.rateLimiter.consume(ip);
 
       reply.header('X-RateLimit-Remaining', result.remaining);
       reply.header('X-RateLimit-Reset', result.resetAt.toISOString());
 
       if (!result.allowed) {
+        // Record threat and potentially auto-block
+        const wasBlocked = this.ipFilter.recordThreat(ip, 'rate_limit.exceeded');
+
         this.auditLogger.log({
           action: 'rate_limit.exceeded',
           ipAddress: ip,
-          details: { path: request.url, retryAfter: result.retryAfter },
+          details: { path: request.url, retryAfter: result.retryAfter, autoBlocked: wasBlocked },
         });
 
         reply.status(429).send({
@@ -518,7 +566,7 @@ export class Gateway {
             if (!result.clean) {
               this.auditLogger.log({
                 action: 'prompt_injection.detected',
-                ipAddress: request.ip,
+                ipAddress: Gateway.getClientIp(request),
                 details: { field: key, blocked: result.blocked },
                 success: false,
                 riskLevel: 'high',
@@ -747,6 +795,132 @@ export class Gateway {
         offset: filters.offset,
       };
     });
+
+    // ═══════════════════════════════════════════════════════════
+    //  SECURITY DASHBOARD API
+    // ═══════════════════════════════════════════════════════════
+
+    // ─── Dashboard Overview ──────────────────────────────────
+    this.app.get('/api/security/dashboard', async () => {
+      const stats = this.ipFilter.getStats();
+      const blockedIPs = this.ipFilter.getBlockedIPs();
+      const threats = this.ipFilter.getThreats(20);
+      const securityStats = await this.auditLogger.getSecurityStats();
+
+      // Recent security events (last 50)
+      const recentEvents = await this.auditLogger.query({
+        riskLevel: 'high',
+        limit: 50,
+      });
+      const recentCritical = await this.auditLogger.query({
+        riskLevel: 'critical',
+        limit: 20,
+      });
+
+      const allEvents = [...recentCritical, ...recentEvents]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 30);
+
+      return {
+        overview: {
+          totalThreats: stats.totalThreats,
+          blockedIPs: stats.blockedIPs,
+          topOffenders: stats.topOffenders,
+          auditStats: securityStats,
+        },
+        threats: threats.map((t: { ip: string; count: number; firstSeen: number; lastSeen: number; blocked: boolean; autoBlocked: boolean; reason: string; blockedAt?: number; expiresAt?: number }) => ({
+          ip: t.ip,
+          count: t.count,
+          firstSeen: t.firstSeen,
+          lastSeen: t.lastSeen,
+          blocked: t.blocked,
+          autoBlocked: t.autoBlocked,
+          reason: t.reason,
+          blockedAt: t.blockedAt,
+          expiresAt: t.expiresAt,
+        })),
+        blockedIPs: blockedIPs.map((t: { ip: string; reason: string; autoBlocked: boolean; blockedAt?: number; expiresAt?: number; count: number }) => ({
+          ip: t.ip,
+          reason: t.reason,
+          autoBlocked: t.autoBlocked,
+          blockedAt: t.blockedAt,
+          expiresAt: t.expiresAt,
+          threatCount: t.count,
+        })),
+        recentAlerts: allEvents.map(e => ({
+          id: e.id,
+          action: e.action,
+          riskLevel: e.riskLevel,
+          ipAddress: e.ipAddress,
+          timestamp: e.timestamp,
+          details: e.details,
+          success: e.success,
+        })),
+        ipFilterConfig: this.ipFilter.getConfig(),
+      };
+    });
+
+    // ─── Threats List ────────────────────────────────────────
+    this.app.get('/api/security/threats', async (request: FastifyRequest) => {
+      const query = request.query as { limit?: string };
+      const limit = parseInt(query.limit ?? '50', 10);
+      const threats = this.ipFilter.getThreats(limit);
+      return { threats };
+    });
+
+    // ─── Blocked IPs List ────────────────────────────────────
+    this.app.get('/api/security/blocked-ips', async () => {
+      const blocked = this.ipFilter.getBlockedIPs();
+      return {
+        blocked: blocked.map((t: { ip: string; reason: string; autoBlocked: boolean; blockedAt?: number; expiresAt?: number; count: number }) => ({
+          ip: t.ip,
+          reason: t.reason,
+          autoBlocked: t.autoBlocked,
+          blockedAt: t.blockedAt,
+          expiresAt: t.expiresAt,
+          threatCount: t.count,
+        })),
+      };
+    });
+
+    // ─── Block IP (manual) ───────────────────────────────────
+    this.app.post('/api/security/block-ip', async (request: FastifyRequest) => {
+      const body = request.body as { ip?: string; reason?: string; durationHours?: number } | null;
+      if (!body?.ip) {
+        return { error: 'IP address is required' };
+      }
+      const durationMs = body.durationHours ? body.durationHours * 60 * 60_000 : 0;
+      this.ipFilter.blockIP(body.ip, body.reason || 'Manual block', durationMs);
+
+      this.auditLogger.log({
+        action: 'security.ip_blocked',
+        ipAddress: Gateway.getClientIp(request),
+        details: { blockedIp: body.ip, reason: body.reason, durationHours: body.durationHours ?? 'permanent' },
+        riskLevel: 'medium',
+      });
+
+      return { success: true, ip: body.ip, blocked: true };
+    });
+
+    // ─── Unblock IP ──────────────────────────────────────────
+    this.app.post('/api/security/unblock-ip', async (request: FastifyRequest) => {
+      const body = request.body as { ip?: string } | null;
+      if (!body?.ip) {
+        return { error: 'IP address is required' };
+      }
+      const unblocked = this.ipFilter.unblockIP(body.ip);
+
+      if (unblocked) {
+        this.auditLogger.log({
+          action: 'security.ip_unblocked',
+          ipAddress: Gateway.getClientIp(request),
+          details: { unblockedIp: body.ip },
+          riskLevel: 'medium',
+        });
+      }
+
+      return { success: unblocked, ip: body.ip };
+    });
   }
 
   private registerBackupRoutes(): void {
@@ -829,11 +1003,12 @@ export class Gateway {
       }
 
       // Validate the temporary access token
-      const result = this.accessTokenManager.validate(query.token, request.ip);
+      const reqIp = Gateway.getClientIp(request);
+      const result = this.accessTokenManager.validate(query.token, reqIp);
       if (!result.valid) {
         this.auditLogger.log({
           action: 'auth.access_token_failed',
-          ipAddress: request.ip,
+          ipAddress: reqIp,
           details: { reason: result.reason },
           success: false,
           riskLevel: 'high',
@@ -846,17 +1021,17 @@ export class Gateway {
       const { randomBytes } = await import('node:crypto');
       const pendingId = randomBytes(24).toString('base64url');
       const csrfToken = randomBytes(32).toString('base64url');
-      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: request.ip, csrfToken });
+      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: reqIp, csrfToken });
 
       this.auditLogger.log({
         action: 'auth.access_token_used',
-        ipAddress: request.ip,
+        ipAddress: reqIp,
         details: { pendingId, awaiting2FA: true },
         success: true,
         riskLevel: 'medium',
       });
 
-      logger.info('Access token validated, awaiting 2FA', { ip: request.ip, pendingId });
+      logger.info('Access token validated, awaiting 2FA', { ip: reqIp, pendingId });
 
       // Check if 2FA is set up
       const has2FA = this.vault.isInitialized() && this.vault.listKeys().includes('system:2fa_secret');
@@ -915,7 +1090,7 @@ export class Gateway {
       if (!pinValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { type: 'setup_bad_pin' },
           success: false,
           riskLevel: 'high',
@@ -931,7 +1106,7 @@ export class Gateway {
       if (!isValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { type: 'setup_confirmation' },
           success: false,
           riskLevel: 'high',
@@ -950,7 +1125,7 @@ export class Gateway {
 
       this.auditLogger.log({
         action: 'auth.2fa_verified',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { type: 'first_setup' },
         success: true,
         riskLevel: 'medium',
@@ -979,7 +1154,7 @@ export class Gateway {
       }
 
       this.pendingSessions.delete(body.pendingId);
-      return this.issueJWTAndRedirect(reply, request.ip);
+      return this.issueJWTAndRedirect(reply, Gateway.getClientIp(request));
     });
 
     // ─── Verify TOTP code + Admin PIN (subsequent logins) ───
@@ -1016,7 +1191,7 @@ export class Gateway {
       if (!pinValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { type: 'login_bad_pin' },
           success: false,
           riskLevel: 'high',
@@ -1036,7 +1211,7 @@ export class Gateway {
       if (!isValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { type: 'login' },
           success: false,
           riskLevel: 'high',
@@ -1047,7 +1222,7 @@ export class Gateway {
 
       this.auditLogger.log({
         action: 'auth.2fa_verified',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { type: 'login' },
         success: true,
         riskLevel: 'medium',
@@ -1065,7 +1240,7 @@ export class Gateway {
           return reply.send(this.getTOTPFormHTML(body.pendingId, 'Failed to send email verification. Check SMTP config.', pending.csrfToken));
         }
 
-        logger.info('Email OTP sent for external login', { ip: request.ip, email: this.emailOTP['maskEmail'] ? '***' : adminEmail });
+        logger.info('Email OTP sent for external login', { ip: Gateway.getClientIp(request), email: this.emailOTP['maskEmail'] ? '***' : adminEmail });
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getEmailOTPFormHTML(body.pendingId, undefined, pending.csrfToken));
       }
@@ -1079,7 +1254,7 @@ export class Gateway {
       }
 
       this.pendingSessions.delete(body.pendingId);
-      return this.issueJWTAndRedirect(reply, request.ip);
+      return this.issueJWTAndRedirect(reply, Gateway.getClientIp(request));
     });
 
     // ─── Verify Email OTP (external access 4th factor) ───
@@ -1129,7 +1304,7 @@ export class Gateway {
       if (!result.valid) {
         this.auditLogger.log({
           action: 'auth.email_otp_failed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { reason: result.reason },
           success: false,
           riskLevel: 'high',
@@ -1140,7 +1315,7 @@ export class Gateway {
 
       this.auditLogger.log({
         action: 'auth.email_otp_verified',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { type: 'external_login' },
         success: true,
         riskLevel: 'medium',
@@ -1153,7 +1328,7 @@ export class Gateway {
       }
 
       this.pendingSessions.delete(body.pendingId);
-      return this.issueJWTAndRedirect(reply, request.ip);
+      return this.issueJWTAndRedirect(reply, Gateway.getClientIp(request));
     });
 
     // ─── Force PIN Change (first login with default PIN) ───
@@ -1211,7 +1386,7 @@ export class Gateway {
 
         this.auditLogger.log({
           action: 'auth.pin_changed',
-          ipAddress: request.ip,
+          ipAddress: Gateway.getClientIp(request),
           details: { type: 'first_login_force_change' },
           success: true,
           riskLevel: 'medium',
@@ -1219,7 +1394,7 @@ export class Gateway {
       }
 
       this.pendingSessions.delete(body.pendingId);
-      return this.issueJWTAndRedirect(reply, request.ip);
+      return this.issueJWTAndRedirect(reply, Gateway.getClientIp(request));
     });
 
     // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
@@ -1907,7 +2082,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
     if (!pending?.csrfToken || !submittedToken || submittedToken !== pending.csrfToken) {
       this.auditLogger.log({
         action: 'auth.csrf_failed',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { pendingId },
         success: false,
         riskLevel: 'high',
@@ -2207,7 +2382,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
     // POST /api/smtp/test — test SMTP connection (rate-limited: 5 req/min)
     this.app.post('/api/smtp/test', async (request: FastifyRequest, reply: FastifyReply) => {
-      const clientIp = request.ip || 'unknown';
+      const clientIp = Gateway.getClientIp(request);
       const rlResult = this.sensitiveRateLimiter.consume(`smtp-test:${clientIp}`);
       if (!rlResult.allowed) {
         reply.status(429);
@@ -2365,7 +2540,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
       this.auditLogger.log({
         action: 'auth.2fa_verified',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { type: 'first_run_setup' },
         success: true,
         riskLevel: 'medium',
@@ -2373,7 +2548,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
       this.auditLogger.log({
         action: 'auth.pin_changed',
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
         details: { type: 'first_run_setup' },
         success: true,
         riskLevel: 'medium',
@@ -2385,7 +2560,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
         username: 'admin',
         role: UserRole.ADMIN,
         sessionId: `setup-${Date.now()}`,
-        ipAddress: request.ip,
+        ipAddress: Gateway.getClientIp(request),
       });
       reply.header('Set-Cookie', `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
 

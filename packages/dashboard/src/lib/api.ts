@@ -174,6 +174,56 @@ export interface GmailMessage {
   attachments: Array<{ filename: string; mimeType: string; size: number }>;
 }
 
+export interface SecurityThreat {
+  ip: string;
+  count: number;
+  firstSeen: number;
+  lastSeen: number;
+  blocked: boolean;
+  autoBlocked: boolean;
+  reason: string;
+  blockedAt?: number;
+  expiresAt?: number;
+}
+
+export interface BlockedIP {
+  ip: string;
+  reason: string;
+  autoBlocked: boolean;
+  blockedAt?: number;
+  expiresAt?: number;
+  threatCount: number;
+}
+
+export interface SecurityAlert {
+  id: string;
+  action: string;
+  riskLevel: string;
+  ipAddress?: string;
+  timestamp: string;
+  details?: Record<string, unknown>;
+  success?: boolean;
+}
+
+export interface SecurityDashboardData {
+  overview: {
+    totalThreats: number;
+    blockedIPs: number;
+    topOffenders: Array<{ ip: string; count: number; reason: string }>;
+    auditStats: Record<string, unknown>;
+  };
+  threats: SecurityThreat[];
+  blockedIPs: BlockedIP[];
+  recentAlerts: SecurityAlert[];
+  ipFilterConfig: {
+    enabled: boolean;
+    mode: string;
+    allowlist: string[];
+    blocklist: string[];
+    allowPrivate: boolean;
+  };
+}
+
 export const api = {
   get: <T = unknown>(path: string) => request<T>(path),
   post: <T = unknown>(path: string, body?: unknown) =>
@@ -292,4 +342,19 @@ export const api = {
     request<{ deleted: boolean; name: string }>(`/api/apps/registry/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   deleteSite: (name: string) =>
     request<{ deleted: boolean; name: string }>(`/api/sites/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // Security Dashboard
+  getSecurityDashboard: () => request<SecurityDashboardData>('/api/security/dashboard'),
+  getSecurityThreats: (limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : '';
+    return request<{ threats: SecurityThreat[] }>(`/api/security/threats${qs}`);
+  },
+  getBlockedIPs: () => request<{ blocked: BlockedIP[] }>('/api/security/blocked-ips'),
+  blockIP: (ip: string, reason?: string, durationHours?: number) =>
+    request<{ success: boolean; ip: string; blocked: boolean }>('/api/security/block-ip', {
+      method: 'POST', body: JSON.stringify({ ip, reason, durationHours }),
+    }),
+  unblockIP: (ip: string) =>
+    request<{ success: boolean; ip: string }>('/api/security/unblock-ip', {
+      method: 'POST', body: JSON.stringify({ ip }),
+    }),
 };

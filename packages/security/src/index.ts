@@ -12,7 +12,7 @@ export type { SanitizeResult } from './input-sanitizer.js';
 export { AdvancedRateLimiter, createAdvancedRateLimiter } from './advanced-rate-limiter.js';
 export type { RateLimitRule, AdvancedRateLimitResult } from './advanced-rate-limiter.js';
 export { IPFilter, createIPFilter } from './ip-filter.js';
-export type { IPFilterConfig } from './ip-filter.js';
+export type { IPFilterConfig, ThreatRecord } from './ip-filter.js';
 export { OAuth2Manager, createOAuth2Manager } from './oauth2.js';
 export type { OAuth2ProviderConfig, OAuth2Token, OAuth2UserInfo } from './oauth2.js';
 export { APIKeyManager, createAPIKeyManager } from './api-key-manager.js';

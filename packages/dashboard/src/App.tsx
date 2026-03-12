@@ -21,6 +21,7 @@ import { RAGPage } from './pages/RAG';
 import { CanvasPage } from './pages/Canvas';
 import { RecordingsPage } from './pages/Recordings';
 import { ActivityPage } from './pages/Activity';
+import { SecurityPage } from './pages/Security';
 
 export function App() {
   return (
@@ -47,6 +48,7 @@ export function App() {
         <Route path="/canvas" element={<CanvasPage />} />
         <Route path="/recordings" element={<RecordingsPage />} />
         <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/security" element={<SecurityPage />} />
       </Route>
     </Routes>
     </I18nProvider>
