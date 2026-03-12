@@ -2592,44 +2592,89 @@ document.getElementById('smtp-user').addEventListener('input', function() {
   private registerSecurityAlerts(): void {
     const broadcaster = getWSBroadcaster();
 
-    // Telegram rate limiting — max 1 message per 60s, batch alerts in between
-    const TG_COOLDOWN_MS = 60_000;
+    // ─── Telegram alert system with escalating cooldown ───
+    // During sustained attacks (scanners, brute-force), alerts scale back:
+    //   Normal: 1 msg per 60s → Under attack: 1 msg per 5min → Sustained: 1 msg per 15min
+    // Rate limit alerts are deduplicated: only 1 notification per burst, then suppressed.
+    // Auto-resets to normal after 10 minutes of quiet.
+    const TG_COOLDOWN_NORMAL = 60_000;       // 60s base cooldown
+    const TG_COOLDOWN_ELEVATED = 5 * 60_000; // 5min during active attack
+    const TG_COOLDOWN_MAX = 15 * 60_000;     // 15min during sustained attack
+    const TG_QUIET_RESET = 10 * 60_000;      // Reset to normal after 10min quiet
+    const TG_MAX_PENDING = 100;              // Cap pending alerts (memory protection)
+
     let lastTgSentAt = 0;
     let pendingAlerts: Array<{ severity: string; title: string; timestamp: number }> = [];
     let batchTimer: ReturnType<typeof setTimeout> | null = null;
+    let currentCooldown = TG_COOLDOWN_NORMAL;
+    let consecutiveBatches = 0;              // Track sustained attack duration
+    let rateLimitSuppressed = 0;             // Count suppressed rate_limit alerts
+    let lastAlertAt = 0;                     // For quiet period detection
+
+    const getCurrentCooldown = (): number => {
+      // Escalate cooldown based on consecutive batches
+      if (consecutiveBatches >= 10) return TG_COOLDOWN_MAX;
+      if (consecutiveBatches >= 3) return TG_COOLDOWN_ELEVATED;
+      return TG_COOLDOWN_NORMAL;
+    };
 
     const flushTelegramAlerts = async () => {
       batchTimer = null;
-      if (pendingAlerts.length === 0) return;
+      if (pendingAlerts.length === 0 && rateLimitSuppressed === 0) return;
 
       try {
         const tg = getTelegramChannel();
-        if (!tg?.isConnected()) { pendingAlerts = []; return; }
+        if (!tg?.isConnected()) { pendingAlerts = []; rateLimitSuppressed = 0; return; }
 
         const perms = tg.getPermissions();
         const adminId = (perms as { adminUsers?: string[] }).adminUsers?.[0];
-        if (!adminId) { pendingAlerts = []; return; }
+        if (!adminId) { pendingAlerts = []; rateLimitSuppressed = 0; return; }
 
         const count = pendingAlerts.length;
         const criticalCount = pendingAlerts.filter(a => a.severity === 'critical').length;
-        const emoji = criticalCount > 0 ? '🚨' : '⚠️';
+        const warningCount = pendingAlerts.filter(a => a.severity === 'warning').length;
+        const hasCritical = criticalCount > 0;
+        const emoji = hasCritical ? '🚨' : '⚠️';
+
+        // Build concise summary — deduplicate by title
+        const titleCounts = new Map<string, number>();
+        for (const a of pendingAlerts) {
+          titleCounts.set(a.title, (titleCounts.get(a.title) ?? 0) + 1);
+        }
 
         let text: string;
-        if (count === 1) {
+        if (count === 1 && rateLimitSuppressed === 0) {
           const a = pendingAlerts[0];
           text = `${emoji} **${a.title}**\n\n_${new Date(a.timestamp).toLocaleString()}_`;
         } else {
-          const summary = pendingAlerts.slice(0, 5).map(a => `• ${a.title}`).join('\n');
-          const extra = count > 5 ? `\n_...and ${count - 5} more_` : '';
-          text = `${emoji} **${count} Security Alerts** (${criticalCount} critical)\n\n${summary}${extra}`;
+          const lines: string[] = [];
+          for (const [title, cnt] of titleCounts) {
+            lines.push(cnt > 1 ? `• ${title} (×${cnt})` : `• ${title}`);
+          }
+          // Add suppressed rate_limit count if any
+          if (rateLimitSuppressed > 0) {
+            lines.push(`• Rate Limit Exceeded (×${rateLimitSuppressed} suppressed)`);
+          }
+          const totalCount = count + rateLimitSuppressed;
+          const cooldownLabel = currentCooldown >= TG_COOLDOWN_MAX ? '15min' :
+                                currentCooldown >= TG_COOLDOWN_ELEVATED ? '5min' : '60s';
+          text = `${emoji} **${totalCount} Security Alerts** (${criticalCount} critical, ${warningCount} warning)\n\n${lines.slice(0, 8).join('\n')}`;
+          if (lines.length > 8) text += `\n_...and ${lines.length - 8} more types_`;
+          if (currentCooldown > TG_COOLDOWN_NORMAL) {
+            text += `\n\n_🔇 Attack mode: notifications every ${cooldownLabel}_`;
+          }
         }
 
         await tg.send({ channelType: 'telegram', recipientId: adminId, content: text });
         lastTgSentAt = Date.now();
+        consecutiveBatches++;
+        currentCooldown = getCurrentCooldown();
         pendingAlerts = [];
+        rateLimitSuppressed = 0;
       } catch (err) {
         logger.error('Failed to send security alert to Telegram', err);
         pendingAlerts = [];
+        rateLimitSuppressed = 0;
       }
     };
 
@@ -2661,6 +2706,16 @@ document.getElementById('smtp-user').addEventListener('input', function() {
     };
 
     this.auditLogger.onAlert(async (alert) => {
+      const now = Date.now();
+
+      // Auto-reset cooldown after quiet period (attack stopped)
+      if (now - lastAlertAt > TG_QUIET_RESET && consecutiveBatches > 0) {
+        consecutiveBatches = 0;
+        currentCooldown = TG_COOLDOWN_NORMAL;
+        logger.info('Security alert cooldown reset to normal (quiet period detected)');
+      }
+      lastAlertAt = now;
+
       // 1. Broadcast to WebSocket clients (instant — cheap)
       broadcaster.broadcastAll({
         type: 'security.alert',
@@ -2673,22 +2728,35 @@ document.getElementById('smtp-user').addEventListener('input', function() {
         },
       });
 
-      // 2. Queue Telegram alert (rate-limited: max 1 msg per 60s)
-      pendingAlerts.push({ severity: alert.severity, title: alert.title, timestamp: Date.now() });
+      // 2. Queue Telegram alert with smart deduplication
+      // During elevated cooldown, suppress rate_limit alerts (they're noise during attacks)
+      const isRateLimitAlert = alert.title === 'Rate Limit Exceeded';
+      if (isRateLimitAlert && currentCooldown > TG_COOLDOWN_NORMAL) {
+        // Suppress — just count, don't queue
+        rateLimitSuppressed++;
+      } else {
+        if (pendingAlerts.length < TG_MAX_PENDING) {
+          pendingAlerts.push({ severity: alert.severity, title: alert.title, timestamp: now });
+        } else {
+          rateLimitSuppressed++; // Overflow goes to suppressed count
+        }
+      }
 
-      const elapsed = Date.now() - lastTgSentAt;
-      if (elapsed >= TG_COOLDOWN_MS) {
+      const elapsed = now - lastTgSentAt;
+      if (elapsed >= currentCooldown) {
         if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
         await flushTelegramAlerts();
       } else if (!batchTimer) {
-        batchTimer = setTimeout(() => flushTelegramAlerts(), TG_COOLDOWN_MS - elapsed);
+        batchTimer = setTimeout(() => flushTelegramAlerts(), currentCooldown - elapsed);
       }
 
-      // 3. Send to generic webhook (if configured)
-      sendWebhookAlerts(alert).catch(() => {});
+      // 3. Send to generic webhook only for high/critical (skip rate_limit noise)
+      if (!isRateLimitAlert || alert.severity === 'critical') {
+        sendWebhookAlerts(alert).catch(() => {});
+      }
     });
 
-    logger.info('Security alert handlers registered (WebSocket + Telegram + Webhook, 60s cooldown)');
+    logger.info('Security alert handlers registered (WebSocket + Telegram + Webhook, escalating cooldown)');
   }
 
   async start(): Promise<void> {
