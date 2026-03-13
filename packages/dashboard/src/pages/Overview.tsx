@@ -188,6 +188,7 @@ export function OverviewPage() {
     );
   }
 
+  const securityTotal = info?.security ? Object.keys(info.security).length : 9;
   const securityModules = info?.security
     ? Object.entries(info.security).filter(([, v]) => v).length
     : 0;
@@ -218,7 +219,7 @@ export function OverviewPage() {
         <div onClick={() => setSecurityExpanded(!securityExpanded)} className="cursor-pointer">
           <StatusCard
             title={t('overview.securityModules')}
-            value={`${securityModules}/9`}
+            value={`${securityModules}/${securityTotal}`}
             icon={<Shield className="w-5 h-5" />}
             status={securityModules >= 7 ? 'healthy' : 'warning'}
             subtitle={securityExpanded ? `▲ ${t('overview.clickClose')}` : `▼ ${t('overview.clickDetails')}`}
