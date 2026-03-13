@@ -595,6 +595,17 @@ export class Gateway {
       return {
         name: APP_NAME,
         version: APP_VERSION,
+        security: {
+          rbac: true,
+          vault: this.vault.isInitialized(),
+          rateLimiter: true,
+          promptGuard: true,
+          inputSanitizer: true,
+          twoFactor: true,
+          auditLog: true,
+          ipFilter: this.ipFilter.getConfig().enabled,
+          sessionSandbox: true,
+        },
       };
     });
 
@@ -626,6 +637,8 @@ export class Gateway {
           inputSanitizer: true,
           twoFactor: true,
           auditLog: true,
+          ipFilter: this.ipFilter.getConfig().enabled,
+          sessionSandbox: true,
         },
         checks: [
           { name: 'gateway', status: 'pass' },
