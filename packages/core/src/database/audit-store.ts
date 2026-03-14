@@ -65,6 +65,10 @@ export class MySQLAuditStore implements AuditLogStore {
     return deleted;
   }
 
+  async updateHash(id: string, hash: string, previousHash: string): Promise<void> {
+    await this.db('audit_log').where('id', id).update({ hash, previous_hash: previousHash });
+  }
+
   async count(filters: AuditQueryFilters): Promise<number> {
     let query = this.db('audit_log').count('* as total');
 

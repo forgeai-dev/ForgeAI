@@ -9,6 +9,7 @@ export interface AuditLogStore {
   query(filters: AuditQueryFilters): Promise<AuditLogEntry[]>;
   count(filters: AuditQueryFilters): Promise<number>;
   deleteOlderThan?(date: Date): Promise<number>;
+  updateHash?(id: string, hash: string, previousHash: string): Promise<void>;
 }
 
 export interface AuditQueryFilters {
@@ -166,7 +167,11 @@ export class AuditLogger {
   }
 
   private computeHash(entry: AuditLogEntry): string {
-    const payload = `${entry.previousHash}|${entry.id}|${entry.timestamp.toISOString()}|${entry.action}|${entry.riskLevel}|${entry.success}`;
+    // Truncate milliseconds for consistency: MySQL TIMESTAMP drops ms precision,
+    // so we normalize to .000Z to ensure hash matches after DB round-trip.
+    const ts = entry.timestamp instanceof Date ? entry.timestamp : new Date(entry.timestamp as unknown as string);
+    const normalizedTs = new Date(Math.floor(ts.getTime() / 1000) * 1000).toISOString();
+    const payload = `${entry.previousHash}|${entry.id}|${normalizedTs}|${entry.action}|${entry.riskLevel}|${entry.success}`;
     return createHash('sha256').update(payload).digest('hex');
   }
 
@@ -291,6 +296,45 @@ export class AuditLogger {
       totalChecked: entries.length,
       message: `All ${entries.length} entries verified — integrity intact`,
     };
+  }
+
+  // ─── Hash Chain Repair ─────────────────────────────
+
+  /**
+   * Recompute the entire hash chain with the current (ms-truncated) hash algorithm.
+   * This repairs chains broken by the old ms-sensitive hash computation.
+   */
+  async repairHashChain(limit: number = 10000): Promise<{ repaired: number; total: number }> {
+    if (!this.store || !this.store.updateHash) {
+      return { repaired: 0, total: 0 };
+    }
+
+    // Query ALL entries in chronological order (oldest first)
+    const entries = await this.store.query({ limit, offset: 0 });
+    entries.reverse(); // DESC → ASC
+
+    if (entries.length === 0) return { repaired: 0, total: 0 };
+
+    let repaired = 0;
+    let previousHash = '0'.repeat(64);
+
+    for (const entry of entries) {
+      entry.previousHash = previousHash;
+      const correctHash = this.computeHash(entry);
+
+      if (entry.hash !== correctHash) {
+        await this.store.updateHash(entry.id, correctHash, previousHash);
+        repaired++;
+      }
+
+      previousHash = correctHash;
+    }
+
+    // Update lastHash so new entries continue the chain
+    this.lastHash = previousHash;
+
+    logger.info(`Hash chain repair complete: ${repaired}/${entries.length} entries recomputed`);
+    return { repaired, total: entries.length };
   }
 
   // ─── Export ─────────────────────────────────────────

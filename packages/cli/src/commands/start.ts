@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createGateway } from '@forgeai/core';
 import { initDatabase, runMigrations } from '@forgeai/core';
-import { MySQLAuditStore } from '@forgeai/core';
+import { MySQLAuditStore, BlockedIPStore } from '@forgeai/core';
 import { APP_NAME, resolveForgeAIRoot } from '@forgeai/shared';
 
 const DEFAULT_SECRETS = ['change-me-to-a-random-jwt-secret', 'change-me-to-a-strong-password', 'change-me-to-a-random-secret'];
@@ -85,6 +85,25 @@ export function registerStartCommand(program: Command): void {
         // Connect audit logger to MySQL
         const auditStore = new MySQLAuditStore(db);
         gateway.auditLogger.setStore(auditStore);
+
+        // Connect blocked IP persistence to MySQL
+        const blockedIPStore = new BlockedIPStore(db);
+        gateway.ipFilter.setPersistence({
+          onBlock: (record) => blockedIPStore.saveBlocked(record),
+          onUnblock: (ip) => blockedIPStore.removeBlocked(ip),
+        });
+        // Load previously blocked IPs
+        try {
+          const blocked = await blockedIPStore.loadBlocked();
+          if (blocked.length > 0) {
+            gateway.ipFilter.loadBlocked(blocked);
+            console.log(`🛡️  Loaded ${blocked.length} blocked IP(s) from database`);
+          }
+          // Clean up expired entries
+          await blockedIPStore.removeExpired();
+        } catch (err) {
+          console.warn('⚠️  Failed to load blocked IPs:', (err as Error).message);
+        }
 
         // Initialize vault with file persistence
         const vaultFilePath = resolve(resolveForgeAIRoot(), 'vault.json');

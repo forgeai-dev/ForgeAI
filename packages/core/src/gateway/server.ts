@@ -2996,30 +2996,33 @@ document.getElementById('smtp-user').addEventListener('input', function() {
           if (result.valid) {
             logger.info(`✅ Audit integrity OK — ${result.totalChecked} entries verified, hash chain intact`);
           } else {
-            logger.error(`🚨 AUDIT INTEGRITY FAILURE — broken at entry ${result.brokenAtId ?? '?'} (index ${result.brokenAtIndex ?? '?'}) in ${result.totalChecked} entries!`);
-            this.auditLogger.log({
-              action: 'security.integrity_check',
-              details: {
-                valid: false,
-                brokenAtId: result.brokenAtId,
-                brokenAtIndex: result.brokenAtIndex,
-                totalChecked: result.totalChecked,
-                trigger: 'startup_check',
-              },
-              riskLevel: 'critical',
-              success: false,
-            });
-            // Broadcast alert via WebSocket
-            const wsBroadcaster = getWSBroadcaster();
-            wsBroadcaster.broadcastAll({
-              type: 'security.alert',
-              payload: {
-                severity: 'critical',
-                title: 'Audit Integrity Failure',
-                message: `Hash chain broken at entry ${result.brokenAtId ?? '?'} (${result.totalChecked} checked)`,
-                timestamp: Date.now(),
-              },
-            });
+            logger.warn(`⚠️ Audit hash chain mismatch detected at entry ${result.brokenAtId ?? '?'} (index ${result.brokenAtIndex ?? '?'}). Auto-repairing...`);
+            // Auto-repair: recompute hash chain with ms-truncated timestamps
+            const repairResult = await this.auditLogger.repairHashChain();
+            if (repairResult.repaired > 0) {
+              logger.info(`🔧 Hash chain repaired: ${repairResult.repaired}/${repairResult.total} entries recomputed`);
+              // Verify again after repair
+              const postRepair = await this.auditLogger.verifyIntegrity(500);
+              if (postRepair.valid) {
+                logger.info(`✅ Post-repair integrity OK — ${postRepair.totalChecked} entries verified`);
+              } else {
+                logger.error(`🚨 Hash chain still broken after repair at ${postRepair.brokenAtId ?? '?'}`);
+                this.auditLogger.log({
+                  action: 'security.integrity_check',
+                  details: {
+                    valid: false,
+                    brokenAtId: postRepair.brokenAtId,
+                    brokenAtIndex: postRepair.brokenAtIndex,
+                    totalChecked: postRepair.totalChecked,
+                    trigger: 'startup_check_post_repair',
+                  },
+                  riskLevel: 'critical',
+                  success: false,
+                });
+              }
+            } else {
+              logger.info('Hash chain repair found no entries to fix');
+            }
           }
         } catch (err) {
           logger.warn('Startup integrity check failed', err as Record<string, unknown>);

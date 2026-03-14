@@ -34,6 +34,11 @@ export interface ThreatRecord {
   expiresAt?: number;  // 0 = permanent
 }
 
+export interface IPFilterPersistence {
+  onBlock(record: ThreatRecord): void | Promise<void>;
+  onUnblock(ip: string): void | Promise<void>;
+}
+
 export class IPFilter {
   private config: IPFilterConfig;
 
@@ -44,6 +49,8 @@ export class IPFilter {
   private autoBlockThreshold: number;
   private autoBlockWindowMs: number;
   private autoBlockDurationMs: number; // 0 = permanent
+
+  private persistence: IPFilterPersistence | null = null;
 
   constructor(config?: Partial<IPFilterConfig & {
     autoBlockThreshold?: number;
@@ -126,6 +133,7 @@ export class IPFilter {
       threat.expiresAt = this.autoBlockDurationMs > 0 ? now + this.autoBlockDurationMs : 0;
       this.addToBlocklist(normalized);
       logger.warn(`IP auto-blocked after ${threat.count} threats`, { ip: normalized, reason });
+      this.persistBlock(threat);
       return true;
     }
 
@@ -177,6 +185,7 @@ export class IPFilter {
     threat.reason = reason;
     this.addToBlocklist(normalized);
     logger.info('IP manually blocked', { ip: normalized, reason, permanent: durationMs === 0 });
+    this.persistBlock(threat);
   }
 
   /**
@@ -190,6 +199,7 @@ export class IPFilter {
     threat.blocked = false;
     this.config.blocklist = this.config.blocklist.filter(i => i !== normalized);
     logger.info('IP unblocked', { ip: normalized });
+    this.persistUnblock(normalized);
     return true;
   }
 
@@ -237,6 +247,51 @@ export class IPFilter {
 
   setMode(mode: 'allowlist' | 'blocklist'): void {
     this.config.mode = mode;
+  }
+
+  /**
+   * Set persistence layer for blocked IPs.
+   */
+  setPersistence(persistence: IPFilterPersistence): void {
+    this.persistence = persistence;
+  }
+
+  /**
+   * Load previously blocked IPs from a persistence store.
+   */
+  loadBlocked(records: ThreatRecord[]): void {
+    const now = Date.now();
+    let loaded = 0;
+    for (const record of records) {
+      // Skip expired entries
+      if (record.expiresAt && record.expiresAt > 0 && now > record.expiresAt) continue;
+      this.threats.set(record.ip, { ...record, blocked: true });
+      this.addToBlocklist(record.ip);
+      loaded++;
+    }
+    if (loaded > 0) {
+      logger.info(`Loaded ${loaded} blocked IPs from store`);
+    }
+  }
+
+  private persistBlock(threat: ThreatRecord): void {
+    if (!this.persistence) return;
+    try {
+      const result = this.persistence.onBlock(threat);
+      if (result instanceof Promise) result.catch(err => logger.error('Failed to persist block', err as Record<string, unknown>));
+    } catch (err) {
+      logger.error('Failed to persist block (sync)', err as Record<string, unknown>);
+    }
+  }
+
+  private persistUnblock(ip: string): void {
+    if (!this.persistence) return;
+    try {
+      const result = this.persistence.onUnblock(ip);
+      if (result instanceof Promise) result.catch(err => logger.error('Failed to persist unblock', err as Record<string, unknown>));
+    } catch (err) {
+      logger.error('Failed to persist unblock (sync)', err as Record<string, unknown>);
+    }
   }
 
   private normalize(ip: string): string {
