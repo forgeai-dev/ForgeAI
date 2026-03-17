@@ -1,11 +1,11 @@
 # 🔥 ForgeAI — Development Roadmap
 
 > Full development history and future plans.
-> Last updated: 2026-03-06
+> Last updated: 2026-03-16
 
 ---
 
-## Status Atual — 35 Fases Completas
+## Status Atual — 36 Fases Completas
 
 ### Fase 1 ✅ — Core + Security + CLI + MySQL
 - `@forgeai/shared` — Types, utils, constants
@@ -101,9 +101,9 @@
 |---------|-----------|-------------|
 | ~~Calendar (Google/Outlook)~~ | ~~Criar/ler eventos, lembretes~~ | ✅ Fase 22 |
 | ~~Notion / Obsidian~~ | ~~Sync de notas e documentos~~ | ✅ Fase 22 |
-| Spotify / Home Assistant | Controle de dispositivos e mídia por chat | Baixa |
+| ~~Spotify / Home Assistant~~ | ~~Controle de dispositivos e mídia por chat~~ | ✅ Done |
 
-> ✅ **Já implementados:** GitHub integration (Fase 14), RSS/Atom feeds (Fase 14), Gmail (Fase 20), Calendar (Fase 22), Notion (Fase 22)
+> ✅ **Já implementados:** GitHub integration (Fase 14), RSS/Atom feeds (Fase 14), Gmail (Fase 20), Calendar (Fase 22), Notion (Fase 22), Spotify (Fase 15), Smart Home/Home Assistant (Fase 15)
 
 ### 🔴 Segurança & Compliance (0 restantes) ✅ COMPLETO
 | Feature | Descrição | Complexidade |
@@ -119,10 +119,10 @@ Channels:        3 restantes (Signal, iMessage, Matrix)
 Agent Avançado:  0 restantes ✅ COMPLETO
 Infraestrutura:  2 restantes (Log aggregation, DB migrations auto)
 Apps Nativas:    1 restante (React Native)
-Integrações:     1 restante (Spotify/HA)
+Integrações:     0 restantes ✅ COMPLETO
 Segurança:       0 restantes ✅ COMPLETO (DB encryption → nice-to-have)
 ────────────────────────────────────────
-Total:          11 features restantes (de 37 originais — 70% concluído!)
+Total:          10 features restantes (de 37 originais — 73% concluído!)
 Intent/Workflow: 0 restantes ✅ COMPLETO (Intent Classifier + Agent Workflow Engine)
 ```
 
@@ -234,6 +234,30 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 ---
 
 ## Roadmap — Fases Completas
+
+### Fase 36 ✅ — Security Hardening (17 Modules) + Blocked IP Persistence + Audit Integrity
+- **8 novos módulos de segurança** (total: 17 módulos ativos):
+  - **Tool Output Sanitizer** — 38 patterns de detecção de indirect prompt injection em outputs de ferramentas (web pages, arquivos, search results) antes de injetar no contexto LLM
+  - **Sensitive File Guard** — 30+ patterns bloqueiam/tagueiam leitura de `.env`, SSH keys, credenciais, vault files, PEM/KEY. Password databases (`/etc/shadow`, SAM) totalmente bloqueados
+  - **Exfiltration Prevention** — 7 regex bloqueiam `curl/wget/scp/nc` com dados sensíveis em `shell_exec`
+  - **Persistence Blocker** — 18 regex bloqueiam reverse shells, manipulação de crontab, injeção de SSH keys, serviços systemd, tarefas agendadas Windows — em `shell_exec` e `file_manager`
+  - **Model Security Profiles** — 28 modelos LLM mapeados para 3 tiers de segurança (high/medium/low). Modelos vulneráveis (GPT-3.5, Ollama) recebem thresholds 43% mais rígidos
+  - **Network Egress Control** — 40+ domínios de exfiltração bloqueados (webhook.site, requestbin, pastebin, ngrok, etc.) + prevenção SSRF (AWS/GCP/Azure metadata)
+  - **Sandbox Isolation** — Containers Docker com `--read-only`, `--no-new-privileges`, `--network none`, limites de memória/CPU. Ativo por padrão para `code_runner`
+  - **System Prompt Defense** — 6 regras de defesa contra indirect prompt injection injetadas no system prompt do LLM
+- **Blocked IP Persistence** — IPs bloqueados agora persistem no MySQL:
+  - Migration 008: tabela `blocked_ips` (ip, reason, auto_blocked, threat_count, blocked_at, expires_at, first_seen, last_seen)
+  - `BlockedIPStore` em `packages/core/src/database/blocked-ip-store.ts` — load/save/remove com limpeza automática de expirados
+  - `IPFilter` com `setPersistence()` (interface callback) e `loadBlocked()` para hidratação do DB no boot
+  - Wired em `packages/cli/src/commands/start.ts` — carrega IPs bloqueados do DB no startup, persiste em cada block/unblock
+- **Audit Hash Chain Integrity Fix** — Correção do `integrity_check valid:false`:
+  - Root cause: MySQL `TIMESTAMP` trunca milissegundos → hash computado na criação ≠ hash recomputado do DB
+  - `computeHash()` agora normaliza timestamps para precisão de segundos antes do hashing
+  - `repairHashChain()` — recomputa toda a cadeia de hashes com algoritmo corrigido
+  - Startup integrity check agora auto-repara cadeias quebradas em vez de disparar alerta crítico
+  - `updateHash()` adicionado a `AuditLogStore` interface e `MySQLAuditStore`
+- **Security info no /info endpoint** — Dashboard Overview agora mostra status dinâmico dos 17 módulos
+- **14 tabelas MySQL**, **150+ API endpoints**, **17 módulos de segurança**
 
 ### Fase 35 ✅ — Intent Classifier + Agent Workflow Engine (State Machine)
 - **Intent Classifier** — Classificação heurística zero-custo (sem chamada LLM):
@@ -497,12 +521,12 @@ forgeai/
 │   ├── security/        # Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Sanitizer
 │   ├── core/            # Gateway (Fastify+WS), Session Manager, DB, Telemetry, Autopilot, Pairing
 │   ├── agent/           # AgentRuntime, AgentManager, LLMRouter (8 providers, failover, circuit breaker), IntentClassifier, AgentWorkflowEngine
-│   ├── channels/        # 7 channels: WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
-│   ├── tools/           # Tool Registry + 11 tools + Integrations (GitHub, Gmail, Calendar, Notion, RSS)
+│   ├── channels/        # 8 channels: WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol
+│   ├── tools/           # Tool Registry + 19 tools + Integrations (GitHub, Gmail, Calendar, Notion, RSS)
 │   ├── plugins/         # Plugin Manager + PluginSDK + 3 built-in plugins
 │   ├── workflows/       # Workflow Engine + step runner
 │   ├── cli/             # CLI: start, doctor, status, onboard
-│   └── dashboard/       # React 19 + Vite 6 + TailwindCSS + Lucide (16 pages)
+│   └── dashboard/       # React 19 + Vite 6 + TailwindCSS + Lucide (19 pages)
 ├── .forgeai/            # Runtime data (vault, workspace, sessions, AUTOPILOT.md)
 ├── docker-compose.yml   # One-command Docker deploy
 ├── Dockerfile           # Multi-stage production build
@@ -517,7 +541,7 @@ forgeai/
 | Language | TypeScript (strict mode) |
 | Runtime | Node.js ≥ 22 |
 | Gateway | Fastify 5 + WebSocket |
-| **Database** | MySQL 8 (Knex.js, 12 tables) |
+| **Database** | MySQL 8 (Knex.js, 14 tables) |
 | Encryption | AES-256-GCM, PBKDF2, bcrypt, HMAC-SHA256 |
 | Auth | JWT (access + refresh) + TOTP (2FA) + OAuth2 (Google/GitHub/Microsoft) |
 | Dashboard | React 19, Vite 6, TailwindCSS, Lucide Icons, Recharts |
@@ -527,9 +551,9 @@ forgeai/
 | Observability | OpenTelemetry (OTLP/HTTP) |
 | Build | tsup, pnpm workspaces |
 | CI/CD | GitHub Actions (build + test + type check) |
-| Tests | Vitest (38 E2E tests) |
+| Tests | Vitest (514+ tests, 10 suites) |
 | Deploy | Docker multi-stage, docker-compose |
 
 ---
 
-**Stats: 8 channels, 19 tools, 10 LLM providers, 19 dashboard pages, 150+ API endpoints, 9 security modules, 5 integrations, 53+ E2E tests, 13 MySQL tables.**
+**Stats: 8 channels, 19 tools, 10 LLM providers, 19 dashboard pages, 150+ API endpoints, 17 security modules, 7 integrations, 514+ tests, 14 MySQL tables.**
