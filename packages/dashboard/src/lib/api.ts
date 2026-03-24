@@ -205,6 +205,20 @@ export interface SecurityAlert {
   success?: boolean;
 }
 
+export interface GeoIPData {
+  ip: string;
+  country: string;
+  countryCode: string;
+  region: string;
+  city: string;
+  isp: string;
+  org: string;
+  lat: number;
+  lon: number;
+  timezone: string;
+  cached: boolean;
+}
+
 export interface SecurityDashboardData {
   overview: {
     totalThreats: number;
@@ -356,5 +370,12 @@ export const api = {
   unblockIP: (ip: string) =>
     request<{ success: boolean; ip: string }>('/api/security/unblock-ip', {
       method: 'POST', body: JSON.stringify({ ip }),
+    }),
+  // IP Geolocation
+  getGeoIP: (ip: string) =>
+    request<GeoIPData>(`/api/security/geoip/${encodeURIComponent(ip)}`),
+  getGeoIPBatch: (ips: string[]) =>
+    request<{ results: Record<string, GeoIPData> }>('/api/security/geoip/batch', {
+      method: 'POST', body: JSON.stringify({ ips }),
     }),
 };

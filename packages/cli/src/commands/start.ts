@@ -99,8 +99,7 @@ export function registerStartCommand(program: Command): void {
             gateway.ipFilter.loadBlocked(blocked);
             console.log(`🛡️  Loaded ${blocked.length} blocked IP(s) from database`);
           }
-          // Clean up expired entries
-          await blockedIPStore.removeExpired();
+          // All blocks are permanent — no expired entries to clean
         } catch (err) {
           console.warn('⚠️  Failed to load blocked IPs:', (err as Error).message);
         }

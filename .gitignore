@@ -13,7 +13,8 @@ Thumbs.db
 forgeai-vault.enc
 
 # IDE / internal workspace data
-.windsurf/
+.kiro/
+.vscode/
 
 # Runtime data (vault with API keys, sessions, workspace prompts, WhatsApp auth)
 .forgeai/
