@@ -66,7 +66,7 @@ export class IPFilter {
     };
     this.autoBlockThreshold = config?.autoBlockThreshold ?? 100;
     this.autoBlockWindowMs = config?.autoBlockWindowMs ?? 5 * 60_000; // 5 min
-    this.autoBlockDurationMs = config?.autoBlockDurationMs ?? 24 * 60 * 60_000; // 24h
+    this.autoBlockDurationMs = config?.autoBlockDurationMs ?? 0; // 0 = permanent (manual unblock only)
 
     logger.info('IP filter initialized', { enabled: this.config.enabled, mode: this.config.mode });
   }
@@ -77,14 +77,8 @@ export class IPFilter {
     // Always check auto-blocked IPs (even if filter is "disabled")
     const threat = this.threats.get(normalized);
     if (threat?.blocked) {
-      // Check expiry
-      if (threat.expiresAt && threat.expiresAt > 0 && Date.now() > threat.expiresAt) {
-        threat.blocked = false;
-        this.config.blocklist = this.config.blocklist.filter(i => i !== normalized);
-        logger.info('Auto-block expired', { ip: normalized });
-      } else {
-        return false;
-      }
+      // Permanent block — only manual unblock removes it
+      return false;
     }
 
     if (!this.config.enabled) return true;
@@ -260,12 +254,10 @@ export class IPFilter {
    * Load previously blocked IPs from a persistence store.
    */
   loadBlocked(records: ThreatRecord[]): void {
-    const now = Date.now();
     let loaded = 0;
     for (const record of records) {
-      // Skip expired entries
-      if (record.expiresAt && record.expiresAt > 0 && now > record.expiresAt) continue;
-      this.threats.set(record.ip, { ...record, blocked: true });
+      // All blocked IPs are permanent — always load them
+      this.threats.set(record.ip, { ...record, blocked: true, expiresAt: 0 });
       this.addToBlocklist(record.ip);
       loaded++;
     }

@@ -13,6 +13,8 @@ export { AdvancedRateLimiter, createAdvancedRateLimiter } from './advanced-rate-
 export type { RateLimitRule, AdvancedRateLimitResult } from './advanced-rate-limiter.js';
 export { IPFilter, createIPFilter } from './ip-filter.js';
 export type { IPFilterConfig, ThreatRecord, IPFilterPersistence } from './ip-filter.js';
+export { IPGeolocationService, createIPGeolocationService } from './ip-geolocation.js';
+export type { GeoIPResult } from './ip-geolocation.js';
 export { OAuth2Manager, createOAuth2Manager } from './oauth2.js';
 export type { OAuth2ProviderConfig, OAuth2Token, OAuth2UserInfo } from './oauth2.js';
 export { APIKeyManager, createAPIKeyManager } from './api-key-manager.js';

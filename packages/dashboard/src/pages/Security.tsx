@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, ShieldAlert, ShieldBan, ShieldCheck, AlertTriangle, Ban, RefreshCw, Plus, X, Clock, Globe, Zap, Eye } from 'lucide-react';
-import { api, type SecurityDashboardData, type SecurityThreat, type BlockedIP, type SecurityAlert } from '@/lib/api';
+import { Shield, ShieldAlert, ShieldBan, ShieldCheck, AlertTriangle, Ban, RefreshCw, Plus, X, Globe, Zap, Eye, MapPin } from 'lucide-react';
+import { api, type SecurityDashboardData, type SecurityThreat, type BlockedIP, type SecurityAlert, type GeoIPData } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+
+// Country code → flag emoji
+function countryFlag(code: string): string {
+  if (!code || code.length !== 2 || code === '??' || code === 'LO') return '🌐';
+  return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+}
 
 type Tab = 'overview' | 'threats' | 'blocked' | 'alerts';
 
@@ -12,15 +18,6 @@ function timeAgo(ts: number): string {
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
   return `${Math.floor(diff / 86400_000)}d ago`;
-}
-
-function formatExpiry(expiresAt?: number): string {
-  if (!expiresAt || expiresAt === 0) return 'Permanent';
-  const remaining = expiresAt - Date.now();
-  if (remaining <= 0) return 'Expired';
-  if (remaining < 3600_000) return `${Math.floor(remaining / 60_000)}m left`;
-  if (remaining < 86400_000) return `${Math.floor(remaining / 3600_000)}h left`;
-  return `${Math.floor(remaining / 86400_000)}d left`;
 }
 
 export function SecurityPage() {
@@ -34,9 +31,11 @@ export function SecurityPage() {
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [blockIp, setBlockIp] = useState('');
   const [blockReason, setBlockReason] = useState('');
-  const [blockDuration, setBlockDuration] = useState<number>(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // Geolocation data
+  const [geoData, setGeoData] = useState<Record<string, GeoIPData>>({});
 
   const fetchData = useCallback(async () => {
     try {
@@ -44,6 +43,19 @@ export function SecurityPage() {
       const result = await api.getSecurityDashboard();
       setData(result);
       setError(null);
+
+      // Fetch geolocation for all unique IPs
+      const allIPs = new Set<string>();
+      result.overview.topOffenders.forEach(o => allIPs.add(o.ip));
+      result.threats.forEach(t => allIPs.add(t.ip));
+      result.blockedIPs.forEach(b => allIPs.add(b.ip));
+      const ipsToFetch = [...allIPs].filter(ip => !geoData[ip]);
+      if (ipsToFetch.length > 0) {
+        try {
+          const { results } = await api.getGeoIPBatch(ipsToFetch);
+          setGeoData(prev => ({ ...prev, ...results }));
+        } catch { /* geo is best-effort */ }
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -71,12 +83,11 @@ export function SecurityPage() {
     if (!blockIp.trim()) return;
     setActionLoading(true);
     try {
-      await api.blockIP(blockIp.trim(), blockReason.trim() || 'Manual block', blockDuration || undefined);
+      await api.blockIP(blockIp.trim(), blockReason.trim() || 'Manual block');
       setToast(t('security.blockSuccess'));
       setShowBlockForm(false);
       setBlockIp('');
       setBlockReason('');
-      setBlockDuration(0);
       await fetchData();
     } catch (err) {
       setToast(`Error: ${(err as Error).message}`);
@@ -173,22 +184,9 @@ export function SecurityPage() {
                   className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-forge-500"
                 />
               </div>
-              <div>
-                <label className="text-xs text-zinc-400 mb-1 block">{t('security.duration')}</label>
-                <select
-                  value={blockDuration}
-                  onChange={e => setBlockDuration(Number(e.target.value))}
-                  aria-label={t('security.duration')}
-                  className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white focus:outline-none focus:border-forge-500"
-                >
-                  <option value={0}>{t('security.permanent')}</option>
-                  <option value={1}>1 {t('security.hours')}</option>
-                  <option value={6}>6 {t('security.hours')}</option>
-                  <option value={24}>24 {t('security.hours')}</option>
-                  <option value={72}>72 {t('security.hours')}</option>
-                  <option value={168}>7 days</option>
-                  <option value={720}>30 days</option>
-                </select>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
+                <Ban className="w-4 h-4 text-red-400" />
+                <span className="text-xs text-zinc-400">{t('security.permanent')} — {t('security.manualUnblockOnly') || 'manual unblock only'}</span>
               </div>
               <button
                 onClick={handleBlock}
@@ -239,9 +237,9 @@ export function SecurityPage() {
         </div>
       ) : data && (
         <>
-          {tab === 'overview' && <OverviewTab data={data} t={t} />}
-          {tab === 'threats' && <ThreatsTab threats={data.threats} t={t} />}
-          {tab === 'blocked' && <BlockedTab blocked={data.blockedIPs} onUnblock={handleUnblock} actionLoading={actionLoading} t={t} />}
+          {tab === 'overview' && <OverviewTab data={data} geoData={geoData} t={t} />}
+          {tab === 'threats' && <ThreatsTab threats={data.threats} geoData={geoData} t={t} />}
+          {tab === 'blocked' && <BlockedTab blocked={data.blockedIPs} geoData={geoData} onUnblock={handleUnblock} actionLoading={actionLoading} t={t} />}
           {tab === 'alerts' && <AlertsTab alerts={data.recentAlerts} t={t} />}
         </>
       )}
@@ -250,7 +248,7 @@ export function SecurityPage() {
 }
 
 /* ─── Overview Tab ──────────────────────────────────── */
-function OverviewTab({ data, t }: { data: SecurityDashboardData; t: (k: string) => string }) {
+function OverviewTab({ data, geoData, t }: { data: SecurityDashboardData; geoData: Record<string, GeoIPData>; t: (k: string) => string }) {
   const stats = [
     { label: t('security.totalThreats'), value: data.overview.totalThreats, icon: <Zap className="w-5 h-5" />, color: 'text-amber-400', bg: 'bg-amber-500/10' },
     { label: t('security.blockedCount'), value: data.overview.blockedIPs, icon: <ShieldBan className="w-5 h-5" />, color: 'text-red-400', bg: 'bg-red-500/10' },
@@ -300,6 +298,12 @@ function OverviewTab({ data, t }: { data: SecurityDashboardData; t: (k: string) 
                 <div key={i} className="flex items-center gap-4 px-5 py-3 hover:bg-zinc-800/30 transition-colors">
                   <span className="text-xs text-zinc-500 w-6 text-right font-mono">#{i + 1}</span>
                   <span className="text-sm text-white font-mono flex-1">{o.ip}</span>
+                  {geoData[o.ip] && (
+                    <span className="text-xs text-zinc-400 flex items-center gap-1">
+                      <span>{countryFlag(geoData[o.ip].countryCode)}</span>
+                      <span className="truncate max-w-28">{geoData[o.ip].city || geoData[o.ip].country}</span>
+                    </span>
+                  )}
                   <span className="text-xs text-zinc-400 truncate max-w-32">{o.reason}</span>
                   <span className="text-sm font-bold text-amber-400">{o.count}</span>
                 </div>
@@ -338,7 +342,7 @@ function OverviewTab({ data, t }: { data: SecurityDashboardData; t: (k: string) 
 }
 
 /* ─── Threats Tab ────────────────────────────────────── */
-function ThreatsTab({ threats, t }: { threats: SecurityThreat[]; t: (k: string) => string }) {
+function ThreatsTab({ threats, geoData, t }: { threats: SecurityThreat[]; geoData: Record<string, GeoIPData>; t: (k: string) => string }) {
   if (threats.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
@@ -352,6 +356,7 @@ function ThreatsTab({ threats, t }: { threats: SecurityThreat[]; t: (k: string) 
     <div className="bg-zinc-800/30 border border-zinc-700/50 rounded-xl overflow-hidden">
       <div className="bg-zinc-800/50 px-5 py-3 flex items-center gap-4 text-xs text-zinc-400 border-b border-zinc-700/50 font-medium">
         <span className="w-40">{t('security.ipAddress')}</span>
+        <span className="w-32"><MapPin className="w-3 h-3 inline mr-1" />Location</span>
         <span className="w-16 text-center">{t('security.hits')}</span>
         <span className="flex-1">{t('security.reason')}</span>
         <span className="w-24">{t('security.firstSeen')}</span>
@@ -362,6 +367,13 @@ function ThreatsTab({ threats, t }: { threats: SecurityThreat[]; t: (k: string) 
         {threats.map((threat, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-3 hover:bg-zinc-800/20 transition-colors">
             <span className="w-40 text-sm text-white font-mono truncate">{threat.ip}</span>
+            <span className="w-32 text-xs text-zinc-400 truncate flex items-center gap-1">
+              {geoData[threat.ip] ? (
+                <><span>{countryFlag(geoData[threat.ip].countryCode)}</span> {geoData[threat.ip].city || geoData[threat.ip].country}</>
+              ) : (
+                <span className="text-zinc-600">—</span>
+              )}
+            </span>
             <span className="w-16 text-center">
               <span className={cn(
                 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold',
@@ -392,7 +404,7 @@ function ThreatsTab({ threats, t }: { threats: SecurityThreat[]; t: (k: string) 
 }
 
 /* ─── Blocked IPs Tab ───────────────────────────────── */
-function BlockedTab({ blocked, onUnblock, actionLoading, t }: { blocked: BlockedIP[]; onUnblock: (ip: string) => void; actionLoading: boolean; t: (k: string) => string }) {
+function BlockedTab({ blocked, geoData, onUnblock, actionLoading, t }: { blocked: BlockedIP[]; geoData: Record<string, GeoIPData>; onUnblock: (ip: string) => void; actionLoading: boolean; t: (k: string) => string }) {
   if (blocked.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
@@ -406,16 +418,24 @@ function BlockedTab({ blocked, onUnblock, actionLoading, t }: { blocked: Blocked
     <div className="bg-zinc-800/30 border border-zinc-700/50 rounded-xl overflow-hidden">
       <div className="bg-zinc-800/50 px-5 py-3 flex items-center gap-4 text-xs text-zinc-400 border-b border-zinc-700/50 font-medium">
         <span className="w-40">{t('security.ipAddress')}</span>
+        <span className="w-32"><MapPin className="w-3 h-3 inline mr-1" />Location</span>
         <span className="w-20 text-center">{t('security.hits')}</span>
         <span className="flex-1">{t('security.reason')}</span>
         <span className="w-20 text-center">Type</span>
-        <span className="w-24">{t('security.expires')}</span>
+        <span className="w-24 text-center">{t('security.status')}</span>
         <span className="w-20 text-right">{t('common.actions')}</span>
       </div>
       <div className="divide-y divide-zinc-700/30">
         {blocked.map((ip, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-3 hover:bg-zinc-800/20 transition-colors">
             <span className="w-40 text-sm text-white font-mono truncate">{ip.ip}</span>
+            <span className="w-32 text-xs text-zinc-400 truncate flex items-center gap-1">
+              {geoData[ip.ip] ? (
+                <><span>{countryFlag(geoData[ip.ip].countryCode)}</span> {geoData[ip.ip].city || geoData[ip.ip].country}</>
+              ) : (
+                <span className="text-zinc-600">—</span>
+              )}
+            </span>
             <span className="w-20 text-center text-xs text-zinc-300 font-bold">{ip.threatCount}</span>
             <span className="flex-1 text-xs text-zinc-400 truncate">{ip.reason}</span>
             <span className="w-20 text-center">
@@ -426,9 +446,10 @@ function BlockedTab({ blocked, onUnblock, actionLoading, t }: { blocked: Blocked
                 {ip.autoBlocked ? t('security.auto') : t('security.manual')}
               </span>
             </span>
-            <span className="w-24 text-xs text-zinc-500 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {formatExpiry(ip.expiresAt)}
+            <span className="w-24 text-center">
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">
+                <Ban className="w-3 h-3" /> {t('security.permanent')}
+              </span>
             </span>
             <span className="w-20 text-right">
               <button

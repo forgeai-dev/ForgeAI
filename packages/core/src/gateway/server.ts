@@ -31,9 +31,11 @@ import {
   createAccessTokenManager,
   createTwoFactorAuth,
   createEmailOTPService,
+  createIPGeolocationService,
   type AccessTokenManager,
   type TwoFactorAuth,
   type EmailOTPService,
+  type IPGeolocationService,
   type JWTAuth,
   type RBACEngine,
   type RateLimiter,
@@ -72,6 +74,7 @@ export class Gateway {
   public readonly accessTokenManager: AccessTokenManager;
   public readonly twoFactor: TwoFactorAuth;
   public readonly emailOTP: EmailOTPService;
+  public readonly geoIP: IPGeolocationService;
   private readonly sensitiveRateLimiter: RateLimiter;
 
   // Localhost IPs for external detection
@@ -163,6 +166,7 @@ export class Gateway {
     });
     this.twoFactor = createTwoFactorAuth('ForgeAI');
     this.emailOTP = createEmailOTPService();
+    this.geoIP = createIPGeolocationService();
 
     // Auto-configure SMTP from environment if available
     if (this.emailOTP.configureFromEnv()) {
@@ -933,6 +937,28 @@ export class Gateway {
       }
 
       return { success: unblocked, ip: body.ip };
+    });
+
+    // ─── IP Geolocation Lookup ───────────────────────────────
+    this.app.get('/api/security/geoip/:ip', async (request: FastifyRequest) => {
+      const { ip } = request.params as { ip: string };
+      if (!ip) return { error: 'IP address is required' };
+      const result = await this.geoIP.lookup(ip);
+      if (!result) return { error: 'Geolocation lookup failed', ip };
+      return result;
+    });
+
+    // ─── Batch IP Geolocation ────────────────────────────────
+    this.app.post('/api/security/geoip/batch', async (request: FastifyRequest) => {
+      const body = request.body as { ips?: string[] } | null;
+      if (!body?.ips || !Array.isArray(body.ips)) return { error: 'Array of IPs is required' };
+      const ips = body.ips.slice(0, 50); // Max 50 per request
+      const results = await this.geoIP.lookupBatch(ips);
+      const mapped: Record<string, unknown> = {};
+      for (const [ip, data] of results) {
+        mapped[ip] = data;
+      }
+      return { results: mapped };
     });
   }
 
